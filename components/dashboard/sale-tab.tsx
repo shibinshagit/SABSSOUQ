@@ -1,10 +1,12 @@
 "use client"
 
+import type React from "react"
+
 import { useState, useEffect, useCallback, useMemo } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Label } from "@/components/ui/label"
 import { Badge } from "@/components/ui/badge"
 import { Skeleton } from "@/components/ui/skeleton"
 import { format } from "date-fns"
@@ -16,24 +18,24 @@ import {
   RefreshCw,
   Calendar,
   User,
-  ChevronDown,
-  ChevronUp,
-  CalendarDays,
-  CheckCircle,
-  Clock,
   XCircle,
-  Banknote,
   CreditCard,
-  Building,
-  DollarSign,
   AlertCircle,
-  X,
-  Printer,
+  Barcode,
+  Trash2,
+  CheckCircle2,
+  ChevronsUpDown,
+  Users,
+  Wrench,
+  Save,
+  Settings,
+  Eye,
+  EyeOff,
+  CalendarDays,
+  Edit,
 } from "lucide-react"
-import { getUserSales, deleteSale } from "@/app/actions/sale-actions"
+import { getUserSales, deleteSale, addSale, getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 import { useToast } from "@/components/ui/use-toast"
-import NewSaleModal from "@/components/sales/new-sale-modal"
-import EditSaleModal from "@/components/sales/edit-sale-modal"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import { useRouter } from "next/navigation"
 import { useSelector, useDispatch } from "react-redux"
@@ -66,23 +68,56 @@ import {
   forceClearSales,
   setError,
   setSearchTerm,
-  setStatusFilter,
-  setPaymentMethodFilter,
   setDateFromFilter,
   setDateToFilter,
-  setMinAmountFilter,
-  setMaxAmountFilter,
+  setStatusFilter,
+  setPaymentMethodFilter,
   setCurrency,
   clearFilters,
   removeSale,
   resetSalesState,
 } from "@/store/slices/salesSlice"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import CustomerSelectSimple from "@/components/sales/customer-select-simple"
+import ProductSelectSimple from "@/components/sales/product-select-simple"
+import { DatePickerField } from "@/components/ui/date-picker-field"
+import NewCustomerModal from "@/components/sales/new-customer-modal"
+import NewProductModal from "@/components/sales/new-product-modal"
+import NewServiceModal from "@/components/services/new-service-modal"
+import { getProductByBarcode } from "@/app/actions/product-actions"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { FormAlert } from "@/components/ui/form-alert"
+import { selectActiveStaff } from "@/store/slices/staffSlice"
+import StaffHeaderDropdown from "../dashboard/staff-header-dropdown"
+import { printSalesReceipt } from "@/lib/receipt-utils"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 interface SaleTabProps {
   userId: number
   isAddModalOpen?: boolean
   onModalClose?: () => void
+}
+
+interface ProductRow {
+  id: string
+  productId: number | null
+  productName: string
+  quantity: number
+  price: number
+  cost: number
+  stock?: number
+  total: number
+  notes?: string
+  originalItemId?: number // For tracking existing items during edit
+  isService?: boolean
+  serviceId?: number
+}
+
+interface ScanResult {
+  status: "success" | "error"
+  message: string
+  barcode: string
+  timestamp: Date
+  productName?: string
 }
 
 const STALE_TIME = 5 * 60 * 1000 // 5 minutes in milliseconds
@@ -92,6 +127,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const dispatch = useDispatch()
   const deviceId = useSelector(selectDeviceId)
   const deviceCurrency = useSelector(selectDeviceCurrency)
+  const activeStaff = useSelector(selectActiveStaff)
 
   // Sales data from Redux
   const sales = useSelector(selectSales)
@@ -115,25 +151,69 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const showFilters = useSelector(selectSalesShowFilters)
   const currency = useSelector(selectSalesCurrency)
 
-  // Local state
-  const [isNewSaleModalOpen, setIsNewSaleModalOpen] = useState(isAddModalOpen)
-  const [isEditSaleModalOpen, setIsEditSaleModalOpen] = useState(false)
+  // Privacy mode state - enabled by default
+  const [privacyMode, setPrivacyMode] = useState(true)
+
+  // Date range picker modal state
+  const [isDateRangeModalOpen, setIsDateRangeModalOpen] = useState(false)
+  const [tempDateFrom, setTempDateFrom] = useState<Date | null>(null)
+  const [tempDateTo, setTempDateTo] = useState<Date | null>(null)
+
+  // Edit mode state
+  const [isEditMode, setIsEditMode] = useState(false)
+  const [editingSaleId, setEditingSaleId] = useState<number | null>(null)
+  const [originalSaleStatus, setOriginalSaleStatus] = useState<string>("")
+
+  // Add Sale Form State
+  const [receivedAmount, setReceivedAmount] = useState(0)
+  const [deviceCurrencyState, setDeviceCurrencyState] = useState(deviceCurrency || "QAR")
+  const [date, setDate] = useState<Date>(new Date())
+  const [customerId, setCustomerId] = useState<number | null>(null)
+  const [customerName, setCustomerName] = useState<string>("")
+  const [staffId, setStaffId] = useState<number | null>(null)
+  const [staffName, setStaffName] = useState<string>("")
+  const [status, setStatus] = useState<string>("Completed")
+  const [paymentMethod, setPaymentMethod] = useState<string>("Cash")
+  const [products, setProducts] = useState<ProductRow[]>([
+    {
+      id: crypto.randomUUID(),
+      productId: null,
+      productName: "",
+      quantity: 1,
+      price: 0,
+      cost: 0,
+      stock: 0,
+      total: 0,
+      notes: "",
+    },
+  ])
+  const [subtotal, setSubtotal] = useState(0)
+  const [discountAmount, setDiscountAmount] = useState(0)
+  const [totalAmount, setTotalAmount] = useState(0)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [scanStatus, setScanStatus] = useState<"idle" | "processing" | "success" | "error">("idle")
+  const [scanHistory, setScanHistory] = useState<ScanResult[]>([])
+  const [barcodeInput, setBarcodeInput] = useState<string>("")
+  const [isBarcodeProcessing, setIsBarcodeProcessing] = useState<boolean>(false)
+  const [lastBarcodeProcessed, setLastBarcodeProcessed] = useState<string>("")
+  const [notes, setNotes] = useState<string>("")
+  const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
+  const [barcodeAlert, setBarcodeAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(
+    null,
+  )
+
+  // Modals
+  const [isNewCustomerModalOpen, setIsNewCustomerModalOpen] = useState(false)
+  const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
+  const [isNewServiceModalOpen, setIsNewServiceModalOpen] = useState(false)
   const [isViewSaleModalOpen, setIsViewSaleModalOpen] = useState(false)
   const [selectedSaleId, setSelectedSaleId] = useState<number | null>(null)
+
+  // Local state
   const [isDeleting, setIsDeleting] = useState(false)
   const [isMobile, setIsMobile] = useState(false)
   const [expandedCards, setExpandedCards] = useState<Set<number>>(new Set())
   const [currentDeviceId, setCurrentDeviceId] = useState<number | null>(null)
-
-  // Date filter modal state
-  const [isDateFilterModalOpen, setIsDateFilterModalOpen] = useState(false)
-  const [tempDateFrom, setTempDateFrom] = useState("")
-  const [tempDateTo, setTempDateTo] = useState("")
-
-  // Amount filter modal state
-  const [isAmountFilterModalOpen, setIsAmountFilterModalOpen] = useState(false)
-  const [tempMinAmount, setTempMinAmount] = useState(minAmountFilter)
-  const [tempMaxAmount, setTempMaxAmount] = useState(maxAmountFilter)
 
   const { toast } = useToast()
   const router = useRouter()
@@ -162,8 +242,43 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   useEffect(() => {
     if (deviceCurrency && deviceCurrency !== currency) {
       dispatch(setCurrency(deviceCurrency))
+      setDeviceCurrencyState(deviceCurrency)
     }
   }, [deviceCurrency, currency, dispatch])
+
+  // Auto-select active staff
+  useEffect(() => {
+    if (activeStaff && !isEditMode) {
+      setStaffId(activeStaff.id)
+      setStaffName(activeStaff.name)
+    }
+  }, [activeStaff, isEditMode])
+
+  // Calculate totals whenever products or discount changes
+  useEffect(() => {
+    const newSubtotal = products.reduce((sum, product) => {
+      const productTotal = typeof product.total === "number" ? product.total : 0
+      return sum + productTotal
+    }, 0)
+
+    setSubtotal(newSubtotal)
+    const discount = typeof discountAmount === "number" ? discountAmount : 0
+    const finalTotal = Math.max(0, newSubtotal - discount)
+    setTotalAmount(finalTotal)
+
+    // Auto-set received amount based on status
+    if (status === "Completed") {
+      setReceivedAmount(finalTotal)
+    } else if (status === "Cancelled") {
+      setReceivedAmount(finalTotal)
+    } else if (status === "Credit") {
+      if (receivedAmount > finalTotal) {
+        setReceivedAmount(0)
+      }
+    } else if (status === "Pending") {
+      setReceivedAmount(0)
+    }
+  }, [products, discountAmount, status])
 
   // Check if data is stale
   const isDataStale = useMemo(() => {
@@ -187,7 +302,19 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     }).format(amount)
   }
 
-  // Fetch sales data from API
+  // Set today's date filter on initial load - but don't fetch, just set the filter
+  useEffect(() => {
+    const today = new Date()
+    const formattedDate = format(today, "yyyy-MM-dd")
+
+    // Only set if not already set
+    if (!dateFromFilter && !dateToFilter) {
+      dispatch(setDateFromFilter(formattedDate))
+      dispatch(setDateToFilter(formattedDate))
+    }
+  }, [dateFromFilter, dateToFilter, dispatch])
+
+  // Fetch sales data from API - only for initial load and forced refresh
   const fetchSalesFromAPI = useCallback(
     async (silent = false) => {
       if (!deviceId) {
@@ -203,6 +330,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         }
 
         dispatch(setError(null))
+
+        console.log("Fetching all sales data from API...")
 
         const result = await getUserSales(deviceId)
 
@@ -242,7 +371,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     }
   }, [deviceId, sales.length, isDataStale, isSilentRefreshing, isLoading, fetchSalesFromAPI])
 
-  // Client-side filtering function - FIXED DATE FILTERING LOGIC
+  // Client-side filtering function - ENHANCED WITH DATE FILTERING
   const applyClientSideFilters = useCallback(() => {
     if (!sales || sales.length === 0) {
       dispatch(setFilteredSales([]))
@@ -250,6 +379,28 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     }
 
     let filtered = [...sales]
+
+    // Date filtering - apply first
+    if (dateFromFilter || dateToFilter) {
+      filtered = filtered.filter((sale) => {
+        const saleDate = new Date(sale.sale_date)
+        saleDate.setHours(0, 0, 0, 0)
+
+        if (dateFromFilter) {
+          const fromDate = new Date(dateFromFilter)
+          fromDate.setHours(0, 0, 0, 0)
+          if (saleDate < fromDate) return false
+        }
+
+        if (dateToFilter) {
+          const toDate = new Date(dateToFilter)
+          toDate.setHours(23, 59, 59, 999)
+          if (saleDate > toDate) return false
+        }
+
+        return true
+      })
+    }
 
     // Search filter
     if (searchTerm && searchTerm.trim() !== "") {
@@ -273,33 +424,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       filtered = filtered.filter((sale) => {
         const paymentMethod = sale.payment_method || "cash"
         return paymentMethod.toLowerCase() === paymentMethodFilter.toLowerCase()
-      })
-    }
-
-    // Date range filter - FIXED LOGIC
-    if (dateFromFilter) {
-      filtered = filtered.filter((sale) => {
-        const saleDate = new Date(sale.sale_date)
-        const fromDate = new Date(dateFromFilter)
-
-        // Set both dates to start of day for accurate comparison
-        saleDate.setHours(0, 0, 0, 0)
-        fromDate.setHours(0, 0, 0, 0)
-
-        return saleDate >= fromDate
-      })
-    }
-
-    if (dateToFilter) {
-      filtered = filtered.filter((sale) => {
-        const saleDate = new Date(sale.sale_date)
-        const toDate = new Date(dateToFilter)
-
-        // Set sale date to start of day, to date to end of day for inclusive comparison
-        saleDate.setHours(0, 0, 0, 0)
-        toDate.setHours(23, 59, 59, 999)
-
-        return saleDate <= toDate
       })
     }
 
@@ -338,17 +462,558 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   // Handle modal state from parent
   useEffect(() => {
-    setIsNewSaleModalOpen(isAddModalOpen)
+    // setIsNewSaleModalOpen(isAddModalOpen)
   }, [isAddModalOpen])
 
   // Handle new sale modal close
   const handleNewSaleModalClose = () => {
-    setIsNewSaleModalOpen(false)
+    // setIsNewSaleModalOpen(false)
     if (onModalClose) {
       onModalClose()
     }
     // Force refresh after adding new sale
     handleForcedRefresh()
+  }
+
+  // Add Sale Form Functions
+  const addProductRow = () => {
+    setProducts([
+      ...products,
+      {
+        id: crypto.randomUUID(),
+        productId: null,
+        productName: "",
+        quantity: 1,
+        price: 0,
+        cost: 0,
+        stock: 0,
+        total: 0,
+        notes: "",
+      },
+    ])
+  }
+
+  const removeProductRow = (id: string) => {
+    if (products.length > 1) {
+      setProducts(products.filter((product) => product.id !== id))
+    }
+  }
+
+  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
+    const updatedProducts = products.map((product) => {
+      if (product.id === id) {
+        const updatedProduct = { ...product, ...updates }
+
+        if (
+          updates.quantity !== undefined &&
+          updatedProduct.stock !== undefined &&
+          updatedProduct.quantity > updatedProduct.stock
+        ) {
+          updatedProduct.quantity = updatedProduct.stock
+          setBarcodeAlert({
+            type: "warning",
+            message: `Only ${updatedProduct.stock} units available for ${updatedProduct.productName}`,
+          })
+        }
+
+        if (updates.quantity !== undefined || updates.price !== undefined) {
+          const quantity = Number(updatedProduct.quantity) || 0
+          const price = Number(updatedProduct.price) || 0
+          updatedProduct.total = quantity * price
+        }
+        return updatedProduct
+      }
+      return product
+    })
+
+    setProducts(updatedProducts)
+  }
+
+  const handleProductSelect = (
+    id: string,
+    productId: number,
+    productName: string,
+    price: number,
+    wholesalePrice?: number,
+    stock?: number,
+  ) => {
+    if (stock !== undefined && stock <= 0) {
+      setBarcodeAlert({
+        type: "error",
+        message: `${productName} is out of stock`,
+      })
+    }
+
+    // Check if this is a service (stock = 999 indicates service)
+    const isService = stock === 999
+
+    updateProductRow(id, {
+      productId,
+      productName,
+      price,
+      cost: wholesalePrice,
+      stock,
+      total: (products.find((p) => p.id === id)?.quantity || 1) * price,
+      isService: isService,
+      serviceId: isService ? productId : undefined,
+    })
+
+    const hasEmptyRow = products.some((p) => p.productId === null)
+    if (!hasEmptyRow) {
+      addProductRow()
+    }
+  }
+
+  const handleNewCustomer = (customerId: number, customerName: string) => {
+    setCustomerId(customerId)
+    setCustomerName(customerName)
+    setIsNewCustomerModalOpen(false)
+  }
+
+  const handleNewProduct = (
+    productId: number,
+    productName: string,
+    price: number,
+    wholesalePrice?: number,
+    stock?: number,
+  ) => {
+    const targetRow = products.find((p) => !p.productId) || products[products.length - 1]
+
+    if (targetRow) {
+      updateProductRow(targetRow.id, {
+        productId,
+        productName,
+        price,
+        cost: wholesalePrice || 0,
+        stock: stock || 0,
+        total: targetRow.quantity * price,
+        isService: false,
+      })
+    } else {
+      setProducts([
+        ...products,
+        {
+          id: crypto.randomUUID(),
+          productId,
+          productName,
+          quantity: 1,
+          price,
+          cost: wholesalePrice || 0,
+          stock: stock || 0,
+          total: price,
+          notes: "",
+          isService: false,
+        },
+      ])
+    }
+
+    setIsNewProductModalOpen(false)
+  }
+
+  const handleNewService = (serviceId: number, serviceName: string, price: number) => {
+    const targetRow = products.find((p) => !p.productId) || products[products.length - 1]
+
+    if (targetRow) {
+      updateProductRow(targetRow.id, {
+        productId: serviceId,
+        productName: serviceName,
+        price,
+        cost: 0,
+        stock: 999,
+        total: targetRow.quantity * price,
+        isService: true,
+        serviceId: serviceId,
+      })
+    } else {
+      setProducts([
+        ...products,
+        {
+          id: crypto.randomUUID(),
+          productId: serviceId,
+          productName: serviceName,
+          quantity: 1,
+          price,
+          cost: 0,
+          stock: 999,
+          total: price,
+          notes: "",
+          isService: true,
+          serviceId: serviceId,
+        },
+      ])
+    }
+
+    setIsNewServiceModalOpen(false)
+  }
+
+  const handleBarcodeInput = async (barcode: string) => {
+    if (barcode === lastBarcodeProcessed || !barcode.trim()) return
+
+    setLastBarcodeProcessed(barcode)
+    setIsBarcodeProcessing(true)
+    setScanStatus("processing")
+    setBarcodeAlert(null)
+
+    try {
+      const result = await getProductByBarcode(barcode)
+
+      if (result.success && result.data) {
+        const existingProductIndex = products.findIndex((p) => p.productId === result.data.id && !p.isService)
+
+        if (existingProductIndex >= 0) {
+          const updatedProducts = [...products]
+          const product = updatedProducts[existingProductIndex]
+          const newQuantity = product.quantity + 1
+
+          if (result.data.stock !== undefined && newQuantity > result.data.stock) {
+            setBarcodeAlert({
+              type: "warning",
+              message: `Only ${result.data.stock} units available for ${result.data.name}`,
+            })
+            updatedProducts[existingProductIndex] = {
+              ...product,
+              quantity: result.data.stock,
+              total: result.data.stock * (Number(result.data.price) || 0),
+            }
+          } else {
+            updatedProducts[existingProductIndex] = {
+              ...product,
+              quantity: newQuantity,
+              total: newQuantity * (Number(result.data.price) || 0),
+            }
+          }
+
+          setProducts(updatedProducts)
+        } else {
+          const emptyRowIndex = products.findIndex((p) => p.productId === null)
+          const newProduct = {
+            id: crypto.randomUUID(),
+            productId: result.data.id,
+            productName: result.data.name,
+            quantity: 1,
+            price: result.data.price,
+            cost: result.data.wholesale_price || 0,
+            stock: result.data.stock || 0,
+            total: result.data.price,
+            notes: "",
+            isService: false,
+          }
+
+          if (emptyRowIndex >= 0) {
+            const updatedProducts = [...products]
+            updatedProducts[emptyRowIndex] = {
+              ...updatedProducts[emptyRowIndex],
+              ...newProduct,
+            }
+            setProducts(updatedProducts)
+          } else {
+            setProducts([...products, newProduct])
+          }
+        }
+
+        setScanStatus("success")
+        setBarcodeAlert({
+          type: "success",
+          message: `Added ${result.data.name} to the sale`,
+        })
+      } else {
+        setScanStatus("error")
+        setBarcodeAlert({
+          type: "error",
+          message: "No product found with this barcode",
+        })
+      }
+    } catch (error) {
+      console.error("Error scanning barcode:", error)
+      setScanStatus("error")
+      setBarcodeAlert({
+        type: "error",
+        message: "Failed to process barcode",
+      })
+    } finally {
+      setBarcodeInput("")
+      setIsBarcodeProcessing(false)
+
+      setTimeout(() => {
+        setScanStatus("idle")
+        setTimeout(() => {
+          setLastBarcodeProcessed("")
+        }, 500)
+      }, 1500)
+    }
+  }
+
+  const resetAddSaleForm = () => {
+    setDate(new Date())
+    setCustomerId(null)
+    setCustomerName("")
+    if (activeStaff) {
+      setStaffId(activeStaff.id)
+      setStaffName(activeStaff.name)
+    }
+    setStatus("Completed")
+    setPaymentMethod("Cash")
+    setProducts([
+      {
+        id: crypto.randomUUID(),
+        productId: null,
+        productName: "",
+        quantity: 1,
+        price: 0,
+        cost: 0,
+        stock: 0,
+        total: 0,
+        notes: "",
+      },
+    ])
+    setDiscountAmount(0)
+    setReceivedAmount(0)
+    setNotes("")
+    setFormAlert(null)
+    setBarcodeAlert(null)
+    setIsEditMode(false)
+    setEditingSaleId(null)
+    setOriginalSaleStatus("")
+  }
+
+  // Load sale data for editing
+  const loadSaleForEdit = async (saleId: number) => {
+    try {
+      setFormAlert(null)
+      setBarcodeAlert(null)
+
+      const result = await getSaleDetails(saleId)
+
+      if (result.success) {
+        const { sale, items } = result.data
+
+        // Set sale data
+        setDate(new Date(sale.sale_date))
+        setCustomerId(sale.customer_id)
+        setCustomerName(sale.customer_name || "")
+        setStatus(sale.status || "Completed")
+        setOriginalSaleStatus(sale.status || "Completed")
+
+        // Set staff information
+        if (sale.staff_id) {
+          setStaffId(sale.staff_id)
+          setStaffName(sale.staff_name || "")
+        } else if (activeStaff) {
+          setStaffId(activeStaff.id)
+          setStaffName(activeStaff.name)
+        }
+
+        // Set payment method
+        if ("payment_method" in sale) {
+          setPaymentMethod(sale.payment_method || "Cash")
+        } else {
+          setPaymentMethod("Cash")
+        }
+
+        setTotalAmount(Number(sale.total_amount) || 0)
+        setDiscountAmount(Number(sale.discount) || 0)
+
+        // Set product rows with actual costs
+        const productRows = items.map((item: any) => {
+          const isService = !!item.service_name
+
+          return {
+            id: crypto.randomUUID(),
+            productId: item.product_id,
+            productName: item.service_name || item.product_name,
+            quantity: item.quantity,
+            price: item.price,
+            cost: item.actual_cost || item.cost || 0,
+            stock: isService ? 999 : item.stock || 0,
+            total: item.quantity * item.price,
+            originalItemId: item.id,
+            notes: item.notes || "",
+            isService: isService,
+            serviceId: isService ? item.product_id : undefined,
+          }
+        })
+
+        setProducts(
+          productRows.length > 0
+            ? productRows
+            : [
+                {
+                  id: crypto.randomUUID(),
+                  productId: null,
+                  productName: "",
+                  quantity: 1,
+                  price: 0,
+                  cost: 0,
+                  stock: 0,
+                  total: 0,
+                  notes: "",
+                  isService: false,
+                },
+              ],
+        )
+
+        setReceivedAmount(Number(sale.received_amount) || (sale.status === "Credit" ? 0 : Number(sale.total_amount)))
+
+        setIsEditMode(true)
+        setEditingSaleId(saleId)
+
+        setFormAlert({
+          type: "success",
+          message: `Loaded sale #${saleId} for editing`,
+        })
+      } else {
+        setFormAlert({
+          type: "error",
+          message: result.message || "Failed to load sale details",
+        })
+      }
+    } catch (error) {
+      console.error("Error loading sale for edit:", error)
+      setFormAlert({
+        type: "error",
+        message: "An error occurred while loading sale details",
+      })
+    }
+  }
+
+  const handleSubmitSale = async (e: React.FormEvent) => {
+    e.preventDefault()
+
+    if (!deviceId) {
+      setFormAlert({
+        type: "error",
+        message: "Device ID not found. Please refresh the page.",
+      })
+      return
+    }
+
+    if (!staffId) {
+      setFormAlert({
+        type: "error",
+        message: "Please select a staff member",
+      })
+      return
+    }
+
+    const validItems = products
+      .filter((p) => p.productId !== null)
+      .map((p) => ({
+        id: p.originalItemId, // Include for edit mode
+        productId: p.productId,
+        quantity: p.quantity,
+        price: p.price,
+        cost: p.cost || 0,
+        notes: p.notes || "",
+        isService: p.isService,
+        serviceId: p.serviceId,
+      }))
+
+    if (validItems.length === 0) {
+      setFormAlert({
+        type: "error",
+        message: "Please add at least one item to the sale",
+      })
+      return
+    }
+
+    if (status === "Credit" && receivedAmount > totalAmount) {
+      setFormAlert({
+        type: "error",
+        message: "Received amount cannot be greater than total amount",
+      })
+      return
+    }
+
+    setIsSubmitting(true)
+
+    try {
+      if (isEditMode && editingSaleId) {
+        // Update existing sale
+        const saleData = {
+          id: editingSaleId,
+          customerId: customerId || null,
+          userId: userId,
+          deviceId: deviceId,
+          items: validItems,
+          paymentStatus: status,
+          paymentMethod: paymentMethod,
+          saleDate: date?.toISOString() || new Date().toISOString(),
+          originalStatus: originalSaleStatus,
+          discount: discountAmount,
+          receivedAmount: receivedAmount,
+          staffId: staffId,
+        }
+
+        const result = await updateSale(saleData)
+
+        if (result.success) {
+          setFormAlert({
+            type: "success",
+            message: "Sale updated successfully",
+          })
+
+          setTimeout(() => {
+            resetAddSaleForm()
+            setFormAlert(null)
+            fetchSalesFromAPI(false)
+          }, 1500)
+        } else {
+          setFormAlert({
+            type: "error",
+            message: result.message || "Failed to update the sale",
+          })
+        }
+      } else {
+        // Add new sale
+        const saleData = {
+          customerId: customerId || null,
+          staffId: staffId || null,
+          userId: userId,
+          deviceId: deviceId,
+          items: validItems,
+          paymentStatus: status,
+          paymentMethod: paymentMethod,
+          saleDate: date?.toISOString() || new Date().toISOString(),
+          notes: notes,
+          discount: discountAmount,
+          receivedAmount: receivedAmount,
+        }
+
+        const result = await addSale(saleData)
+
+        if (result.success) {
+          setFormAlert({
+            type: "success",
+            message: "Sale completed successfully",
+          })
+
+          if (result.data && result.data.sale) {
+            setTimeout(() => {
+              printSalesReceipt(result.data.sale, result.data.items)
+            }, 500)
+          }
+
+          setTimeout(() => {
+            resetAddSaleForm()
+            setFormAlert(null)
+            fetchSalesFromAPI(false)
+          }, 1500)
+        } else {
+          setFormAlert({
+            type: "error",
+            message: result.message || "Failed to complete the sale",
+          })
+        }
+      }
+    } catch (error) {
+      console.error("Sale submission error:", error)
+      setFormAlert({
+        type: "error",
+        message: "An unexpected error occurred",
+      })
+    } finally {
+      setIsSubmitting(false)
+    }
   }
 
   // Handle view sale - now called when clicking on a sale row
@@ -357,15 +1022,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     setIsViewSaleModalOpen(true)
   }
 
-  // Handle edit sale from view modal
-  const handleEditSaleFromView = (saleData: any) => {
-    setSelectedSaleId(saleData.id)
-    // Close view modal first
-    setIsViewSaleModalOpen(false)
-    // Then open edit modal with a small delay to ensure proper rendering
-    setTimeout(() => {
-      setIsEditSaleModalOpen(true)
-    }, 100)
+  // Handle edit sale - load sale data into form
+  const handleEditSale = (sale: any) => {
+    loadSaleForEdit(sale.id)
   }
 
   // Handle print invoice from view modal
@@ -395,7 +1054,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
           description: "Sale deleted successfully",
         })
         // Force refresh after deletion
-        handleForcedRefresh()
+        fetchSalesFromAPI(false)
       } else {
         toast({
           title: "Error",
@@ -443,6 +1102,32 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     minAmountFilter ||
     maxAmountFilter
 
+  // Check if today filter is active
+  const isTodayFilterActive = () => {
+    const today = format(new Date(), "yyyy-MM-dd")
+    return dateFromFilter === today && dateToFilter === today
+  }
+
+  // Check if custom date range is active
+  const isCustomDateRangeActive = () => {
+    return dateFromFilter && dateToFilter && !isTodayFilterActive()
+  }
+
+  // Get custom date range display text
+  const getCustomDateRangeText = () => {
+    if (dateFromFilter && dateToFilter) {
+      const fromDate = new Date(dateFromFilter)
+      const toDate = new Date(dateToFilter)
+
+      if (dateFromFilter === dateToFilter) {
+        return format(fromDate, "MMM d")
+      } else {
+        return `${format(fromDate, "MMM d")} - ${format(toDate, "MMM d")}`
+      }
+    }
+    return "Custom"
+  }
+
   // Handle forced refresh - clears Redux and fetches fresh data
   const handleForcedRefresh = () => {
     console.log("Forced refresh initiated...")
@@ -472,11 +1157,17 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     })
   }
 
-  // Handle Today filter
+  // Handle Today filter - just set the date filter, no API call
   const handleTodayFilter = () => {
     const today = new Date()
     const formattedDate = format(today, "yyyy-MM-dd")
 
+    // Clear other filters but keep the sales data
+    dispatch(setSearchTerm(""))
+    dispatch(setStatusFilter("all"))
+    dispatch(setPaymentMethodFilter("all"))
+
+    // Set today's date
     dispatch(setDateFromFilter(formattedDate))
     dispatch(setDateToFilter(formattedDate))
 
@@ -486,325 +1177,58 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     })
   }
 
-  // Handle This Week filter
-  const handleThisWeekFilter = () => {
-    const today = new Date()
-    const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay()))
-    const endOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 6))
+  // Handle custom date range
+  const handleCustomDateRange = () => {
+    setTempDateFrom(dateFromFilter ? new Date(dateFromFilter) : new Date())
+    setTempDateTo(dateToFilter ? new Date(dateToFilter) : new Date())
+    setIsDateRangeModalOpen(true)
+  }
 
-    dispatch(setDateFromFilter(format(startOfWeek, "yyyy-MM-dd")))
-    dispatch(setDateToFilter(format(endOfWeek, "yyyy-MM-dd")))
+  // Apply custom date range - just set the filters, no API call
+  const applyCustomDateRange = () => {
+    if (tempDateFrom && tempDateTo) {
+      const fromDateStr = format(tempDateFrom, "yyyy-MM-dd")
+      const toDateStr = format(tempDateTo, "yyyy-MM-dd")
+
+      dispatch(setDateFromFilter(fromDateStr))
+      dispatch(setDateToFilter(toDateStr))
+
+      toast({
+        title: "Date Range Applied",
+        description: `Showing sales from ${format(tempDateFrom, "MMM d")} to ${format(tempDateTo, "MMM d")}`,
+      })
+    }
+    setIsDateRangeModalOpen(false)
+  }
+
+  // Handle status filter
+  const handleStatusFilter = () => {
+    const statuses = ["all", "completed", "credit", "pending", "cancelled"]
+    const currentIndex = statuses.indexOf(statusFilter || "all")
+    const nextIndex = (currentIndex + 1) % statuses.length
+    const nextStatus = statuses[nextIndex]
+
+    dispatch(setStatusFilter(nextStatus))
 
     toast({
-      title: "This Week's Sales",
-      description: `Showing sales for this week`,
+      title: "Status Filter",
+      description: `Showing ${nextStatus === "all" ? "all" : nextStatus} sales`,
     })
   }
 
-  // Handle This Month filter
-  const handleThisMonthFilter = () => {
-    const today = new Date()
-    const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-    const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+  // Handle payment method filter
+  const handlePaymentMethodFilter = () => {
+    const methods = ["all", "cash", "card", "online"]
+    const currentIndex = methods.indexOf(paymentMethodFilter || "all")
+    const nextIndex = (currentIndex + 1) % methods.length
+    const nextMethod = methods[nextIndex]
 
-    dispatch(setDateFromFilter(format(startOfMonth, "yyyy-MM-dd")))
-    dispatch(setDateToFilter(format(endOfMonth, "yyyy-MM-dd")))
+    dispatch(setPaymentMethodFilter(nextMethod))
 
     toast({
-      title: "This Month's Sales",
-      description: `Showing sales for ${format(startOfMonth, "MMMM yyyy")}`,
+      title: "Payment Filter",
+      description: `Showing ${nextMethod === "all" ? "all" : nextMethod} payments`,
     })
-  }
-
-  // Handle date filter apply
-  const handleDateFilterApply = () => {
-    if (tempDateFrom) dispatch(setDateFromFilter(tempDateFrom))
-    if (tempDateTo) dispatch(setDateToFilter(tempDateTo))
-    setIsDateFilterModalOpen(false)
-
-    if (tempDateFrom || tempDateTo) {
-      toast({
-        title: "Date Filter Applied",
-        description: `Showing sales from ${tempDateFrom || "start"} to ${tempDateTo || "end"}`,
-      })
-    }
-  }
-
-  // Clear date filter
-  const handleClearDateFilter = () => {
-    dispatch(setDateFromFilter(""))
-    dispatch(setDateToFilter(""))
-    setTempDateFrom("")
-    setTempDateTo("")
-    setIsDateFilterModalOpen(false)
-  }
-
-  // Open date filter modal with current values
-  const openDateFilterModal = () => {
-    setTempDateFrom(dateFromFilter)
-    setTempDateTo(dateToFilter)
-    setIsDateFilterModalOpen(true)
-  }
-
-  // Handle amount filter apply
-  const handleAmountFilterApply = () => {
-    if (tempMinAmount) dispatch(setMinAmountFilter(tempMinAmount))
-    if (tempMaxAmount) dispatch(setMaxAmountFilter(tempMaxAmount))
-    setIsAmountFilterModalOpen(false)
-
-    if (tempMinAmount || tempMaxAmount) {
-      toast({
-        title: "Amount Filter Applied",
-        description: `Showing sales from ${tempMinAmount || "0"} to ${tempMaxAmount || "unlimited"}`,
-      })
-    }
-  }
-
-  // Clear amount filter
-  const handleClearAmountFilter = () => {
-    dispatch(setMinAmountFilter(""))
-    dispatch(setMaxAmountFilter(""))
-    setTempMinAmount("")
-    setTempMaxAmount("")
-    setIsAmountFilterModalOpen(false)
-  }
-
-  // Toggle card expansion
-  const toggleCardExpansion = (saleId: number) => {
-    const newExpanded = new Set(expandedCards)
-    if (newExpanded.has(saleId)) {
-      newExpanded.delete(saleId)
-    } else {
-      newExpanded.add(saleId)
-    }
-    setExpandedCards(newExpanded)
-  }
-
-  // Get status display text
-  const getStatusDisplayText = () => {
-    switch (statusFilter) {
-      case "completed":
-        return "Completed"
-      case "credit":
-        return "Credit"
-      case "cancelled":
-        return "Cancelled"
-      default:
-        return "All Status"
-    }
-  }
-
-  // Get payment method display text
-  const getPaymentMethodDisplayText = () => {
-    switch (paymentMethodFilter) {
-      case "cash":
-        return "Cash"
-      case "card":
-        return "Card"
-      case "bank_transfer":
-        return "Online"
-      default:
-        return "All Payment"
-    }
-  }
-
-  // Handle print sales report
-  const handlePrintSalesReport = () => {
-    if (filteredSales.length === 0) {
-      toast({
-        title: "No Data",
-        description: "No sales data to print",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Calculate summary statistics
-    const totalSales = filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0)
-    const totalReceived = filteredSales.reduce((sum, sale) => {
-      if (sale.status === "Credit") {
-        return sum + Number(sale.received_amount || 0)
-      } else if (sale.status === "Completed") {
-        return sum + Number(sale.total_amount)
-      }
-      return sum
-    }, 0)
-    const totalOutstanding = filteredSales.reduce((sum, sale) => {
-      if (sale.status === "Credit") {
-        return sum + getRemainingAmount(sale)
-      }
-      return sum
-    }, 0)
-
-    // Create print window
-    const printWindow = window.open("", "_blank")
-    if (!printWindow) {
-      toast({
-        title: "Error",
-        description: "Unable to open print window. Please check your browser settings.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const printContent = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Sales Report</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              margin: 20px; 
-              color: #333;
-            }
-            .header { 
-              text-align: center; 
-              margin-bottom: 30px; 
-              border-bottom: 2px solid #333;
-              padding-bottom: 20px;
-            }
-            .company-name { 
-              font-size: 24px; 
-              font-weight: bold; 
-              margin-bottom: 5px;
-            }
-            .report-title { 
-              font-size: 18px; 
-              color: #666;
-            }
-            .summary { 
-              display: grid; 
-              grid-template-columns: repeat(4, 1fr); 
-              gap: 20px; 
-              margin-bottom: 30px;
-            }
-            .summary-card { 
-              text-align: center; 
-              padding: 15px; 
-              border: 1px solid #ddd; 
-              border-radius: 8px;
-            }
-            .summary-value { 
-              font-size: 20px; 
-              font-weight: bold; 
-              color: #2563eb;
-            }
-            .summary-label { 
-              font-size: 12px; 
-              color: #666; 
-              margin-top: 5px;
-            }
-            table { 
-              width: 100%; 
-              border-collapse: collapse; 
-              margin-top: 20px;
-            }
-            th, td { 
-              border: 1px solid #ddd; 
-              padding: 8px; 
-              text-align: left; 
-              font-size: 12px;
-            }
-            th { 
-              background-color: #f5f5f5; 
-              font-weight: bold;
-            }
-            .status-completed { color: #16a34a; }
-            .status-credit { color: #ea580c; }
-            .status-cancelled { color: #dc2626; }
-            .amount { text-align: right; }
-            .print-date { 
-              text-align: center; 
-              margin-top: 30px; 
-              font-size: 12px; 
-              color: #666;
-            }
-            @media print {
-              body { margin: 0; }
-              .summary { grid-template-columns: repeat(2, 1fr); }
-            }
-          </style>
-        </head>
-        <body>
-          <div class="header">
-            <div class="company-name">Sales Report</div>
-            <div class="report-title">Generated on ${format(new Date(), "MMMM d, yyyy 'at' HH:mm")}</div>
-          </div>
-          
-          <div class="summary">
-            <div class="summary-card">
-              <div class="summary-value">${filteredSales.length}</div>
-              <div class="summary-label">Total Sales</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">${formatCurrency(totalSales)}</div>
-              <div class="summary-label">Total Amount</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">${formatCurrency(totalReceived)}</div>
-              <div class="summary-label">Total Received</div>
-            </div>
-            <div class="summary-card">
-              <div class="summary-value">${formatCurrency(totalOutstanding)}</div>
-              <div class="summary-label">Outstanding</div>
-            </div>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th>Sale ID</th>
-                <th>Date</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Payment</th>
-                <th>Amount</th>
-                <th>Received</th>
-                <th>Remaining</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredSales
-                .map(
-                  (sale) => `
-                <tr>
-                  <td>#${sale.id}</td>
-                  <td>${format(new Date(sale.sale_date), "MMM d, yyyy")}</td>
-                  <td>${sale.customer_name || "Walk-in Customer"}</td>
-                  <td class="status-${sale.status?.toLowerCase()}">${sale.status}</td>
-                  <td>${getPaymentMethodDisplay(sale)}</td>
-                  <td class="amount">${formatCurrency(Number(sale.total_amount))}</td>
-                  <td class="amount">${
-                    sale.status === "Credit"
-                      ? formatCurrency(Number(sale.received_amount || 0))
-                      : sale.status === "Completed"
-                        ? formatCurrency(Number(sale.total_amount))
-                        : "0"
-                  }</td>
-                  <td class="amount">${
-                    sale.status === "Credit" && getRemainingAmount(sale) > 0
-                      ? formatCurrency(getRemainingAmount(sale))
-                      : "0"
-                  }</td>
-                </tr>
-              `,
-                )
-                .join("")}
-            </tbody>
-          </table>
-          
-          <div class="print-date">
-            Report generated on ${format(new Date(), "EEEE, MMMM d, yyyy 'at' HH:mm:ss")}
-          </div>
-        </body>
-      </html>
-    `
-
-    printWindow.document.write(printContent)
-    printWindow.document.close()
-    printWindow.focus()
-    printWindow.print()
   }
 
   // Auto-refresh effect
@@ -823,22 +1247,21 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
   // Skeleton loading component
   const SalesTableSkeleton = () => (
-    <div className="space-y-3">
-      {[...Array(5)].map((_, i) => (
-        <div key={i} className="flex items-center space-x-4 p-4">
-          <Skeleton className="h-4 w-8" />
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-32" />
-          <Skeleton className="h-4 w-24" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-16" />
-          <Skeleton className="h-4 w-20" />
-          <Skeleton className="h-4 w-24" />
+    <div className="space-y-2">
+      {[...Array(3)].map((_, i) => (
+        <div key={i} className="flex items-center space-x-2 p-2">
+          <Skeleton className="h-3 w-8 bg-gray-300 dark:bg-gray-600" />
+          <Skeleton className="h-3 w-16 bg-gray-300 dark:bg-gray-600" />
+          <Skeleton className="h-3 w-12 bg-gray-300 dark:bg-gray-600" />
         </div>
       ))}
+    </div>
+  )
+
+  // Privacy mode display value
+  const getPrivacyValue = () => (
+    <div className="flex items-center justify-center">
+      <EyeOff className="h-4 w-4 text-gray-400" />
     </div>
   )
 
@@ -848,23 +1271,20 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     const remainingAmount = getRemainingAmount(sale)
 
     return (
-      <Card
-        className="mb-4 overflow-hidden border border-gray-200 hover:shadow-md transition-all duration-200 dark:bg-gray-800 dark:border-gray-700 cursor-pointer"
-        onClick={() => handleViewSale(sale)}
-      >
+      <Card className="mb-2 overflow-hidden border border-gray-200 dark:border-gray-600 hover:shadow-md transition-all duration-200 bg-white dark:bg-gray-800">
         <CardContent className="p-0">
           {/* Main card content */}
-          <div className="p-4">
+          <div className="p-3">
             {/* Header row */}
-            <div className="flex items-center justify-between mb-3">
+            <div className="flex items-center justify-between mb-2">
               <div className="flex items-center gap-2">
-                <span className="text-sm font-medium text-gray-500 dark:text-gray-400">#{sale.id}</span>
+                <span className="text-xs font-medium text-gray-400">#{sale.id}</span>
                 <Badge
                   variant="outline"
                   className={
                     sale.sale_type === "service"
-                      ? "bg-green-100 text-green-800 border-green-300"
-                      : "bg-blue-100 text-blue-800 border-blue-300"
+                      ? "bg-green-50 dark:bg-green-900 text-green-600 dark:text-green-300 border-green-200 dark:border-green-600 text-xs"
+                      : "bg-blue-50 dark:bg-blue-900 text-blue-600 dark:text-blue-300 border-blue-200 dark:border-blue-600 text-xs"
                   }
                 >
                   {sale.sale_type === "service" ? "Service" : "Product"}
@@ -873,857 +1293,868 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
               <div className="flex items-center gap-2">
                 <Badge
                   variant="outline"
-                  className={
+                  className={`text-xs ${
                     sale.status === "Completed"
-                      ? "bg-green-100 text-green-800 border-green-300"
+                      ? "bg-green-50 dark:bg-green-900 text-green-600 dark:text-green-300 border-green-200 dark:border-green-600"
                       : sale.status === "Credit"
-                        ? "bg-orange-100 text-orange-800 border-orange-300"
+                        ? "bg-orange-50 dark:bg-orange-900 text-orange-600 dark:text-orange-300 border-orange-200 dark:border-orange-600"
                         : sale.status === "Cancelled"
-                          ? "bg-red-100 text-red-800 border-red-300"
-                          : "bg-yellow-100 text-yellow-800 border-yellow-300"
-                  }
+                          ? "bg-red-50 dark:bg-red-900 text-red-600 dark:text-red-300 border-red-200 dark:border-red-600"
+                          : "bg-yellow-50 dark:bg-yellow-900 text-yellow-600 dark:text-yellow-300 border-yellow-200 dark:border-yellow-600"
+                  }`}
                 >
                   {sale.status}
                 </Badge>
               </div>
             </div>
 
-            {/* Type and customer - Type first, customer underneath */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex flex-col gap-1">
-                <Badge
-                  variant="outline"
-                  className={
-                    sale.sale_type === "service"
-                      ? "bg-green-100 text-green-800 border-green-300 w-fit"
-                      : "bg-blue-100 text-blue-800 border-blue-300 w-fit"
-                  }
-                >
-                  {sale.sale_type === "service" ? "Service" : "Product"}
-                </Badge>
-                <div className="flex items-center gap-2">
-                  <User className="h-4 w-4 text-gray-500 dark:text-gray-400" />
-                  <span className="text-sm font-medium text-gray-900 dark:text-gray-100">
-                    {sale.customer_name || "Walk-in Customer"}
-                  </span>
-                </div>
+            {/* Customer and amount */}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1">
+                <User className="h-3 w-3 text-gray-400" />
+                <span className="text-xs font-medium text-gray-600 dark:text-gray-200 truncate max-w-[100px]">
+                  {sale.customer_name || "Walk-in"}
+                </span>
               </div>
-              <div className="flex items-center gap-1 text-sm text-gray-500 dark:text-gray-400">
-                <Calendar className="h-4 w-4" />
+              <div className="text-xs font-bold text-gray-900 dark:text-gray-100">
+                {privacyMode ? getPrivacyValue() : formatCurrency(Number(sale.total_amount))}
+              </div>
+            </div>
+
+            {/* Date and payment */}
+            <div className="flex items-center justify-between mb-2">
+              <div className="flex items-center gap-1 text-xs text-gray-400">
+                <Calendar className="h-3 w-3" />
                 {format(new Date(sale.sale_date), "MMM d")}
               </div>
+              <Badge
+                variant="outline"
+                className="bg-gray-50 dark:bg-gray-700 text-gray-600 dark:text-gray-300 border-gray-200 dark:border-gray-600 text-xs"
+              >
+                {getPaymentMethodDisplay(sale)}
+              </Badge>
             </div>
 
-            {/* Amount and payment */}
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-lg font-bold text-gray-900 dark:text-gray-100">
-                  {formatCurrency(Number(sale.total_amount))}
-                </div>
-                {sale.status === "Credit" && remainingAmount > 0 && (
-                  <div className="text-sm text-red-600">Remaining: {formatCurrency(remainingAmount)}</div>
-                )}
-              </div>
-              <div className="text-right">
-                <Badge variant="outline" className="bg-gray-100 text-gray-800 mb-1">
-                  {getPaymentMethodDisplay(sale)}
-                </Badge>
-                {sale.staff_name && <div className="text-xs text-gray-500 dark:text-gray-400">{sale.staff_name}</div>}
-              </div>
+            {/* Action buttons */}
+            <div className="flex items-center justify-between pt-2 border-t border-gray-100 dark:border-gray-700">
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleViewSale(sale)
+                }}
+                variant="ghost"
+                size="sm"
+                className="text-xs h-6 px-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                <Eye className="h-3 w-3 mr-1" />
+                View
+              </Button>
+              <Button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  handleEditSale(sale)
+                }}
+                variant="ghost"
+                size="sm"
+                className="text-xs h-6 px-2 text-green-600 dark:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/20"
+              >
+                <Edit className="h-3 w-3 mr-1" />
+                Edit
+              </Button>
             </div>
 
-            {/* Expand/Collapse button */}
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={(e) => {
-                e.stopPropagation()
-                toggleCardExpansion(sale.id)
-              }}
-              className="w-full justify-center text-gray-500 dark:text-gray-400 hover:text-gray-700"
-            >
-              {isExpanded ? (
-                <>
-                  <ChevronUp className="h-4 w-4 mr-1" />
-                  Less Details
-                </>
-              ) : (
-                <>
-                  <ChevronDown className="h-4 w-4 mr-1" />
-                  More Details
-                </>
-              )}
-            </Button>
+            {sale.status === "Credit" && remainingAmount > 0 && (
+              <div className="text-xs text-red-500 dark:text-red-400 mt-1">
+                Remaining: {privacyMode ? getPrivacyValue() : formatCurrency(remainingAmount)}
+              </div>
+            )}
           </div>
-
-          {/* Expanded details */}
-          {isExpanded && (
-            <div className="border-t border-gray-200 bg-gray-50 p-4 space-y-3">
-              <div className="grid grid-cols-2 gap-4 text-sm">
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Received:</span>
-                  <div className="font-medium text-green-600">
-                    {sale.status === "Credit"
-                      ? formatCurrency(Number(sale.received_amount || 0))
-                      : sale.status === "Completed"
-                        ? formatCurrency(Number(sale.total_amount))
-                        : "0"}
-                  </div>
-                </div>
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Discount:</span>
-                  <div className="font-medium text-purple-600">{formatCurrency(Number(sale.discount || 0))}</div>
-                </div>
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Cost:</span>
-                  <div className="font-medium text-orange-600">{formatCurrency(Number(sale.total_cost || 0))}</div>
-                </div>
-                <div>
-                  <span className="text-gray-500 dark:text-gray-400">Profit:</span>
-                  <div
-                    className={`font-medium ${
-                      Number(sale.total_amount) - Number(sale.total_cost || 0) > 0 ? "text-green-600" : "text-red-600"
-                    }`}
-                  >
-                    {formatCurrency(Number(sale.total_amount) - Number(sale.total_cost || 0))}
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
         </CardContent>
       </Card>
     )
   }
 
   return (
-    <div className="space-y-4">
-      {/* Summary Cards - Made sticky with increased top margin */}
-      <div className="sticky top-6 z-10 bg-gray-50 dark:bg-gray-900 pb-4 mb-4 pt-4">
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
-          <Card className="bg-gradient-to-r from-blue-500 to-blue-600 text-white">
-            <CardContent className="p-3 md:p-4">
-              <div className="text-center">
-                <div className="text-lg md:text-2xl font-bold">
-                  {formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0))}
+    <div className="flex gap-3 h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+      {/* Left side - Add Sale Form (75% width) */}
+      <div className="w-3/4 flex flex-col">
+        {/* Add Sale Form */}
+        <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+          <CardContent className="p-0 h-full">
+            {/* Header with edit mode indicator */}
+            {isEditMode && (
+              <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                    <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                      Editing Sale #{editingSaleId}
+                    </span>
+                  </div>
+                  <Button
+                    onClick={resetAddSaleForm}
+                    variant="ghost"
+                    size="sm"
+                    className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
+                  >
+                    Cancel Edit
+                  </Button>
                 </div>
-                <div className="text-xs md:text-sm text-blue-100">Total Sales</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-r from-green-500 to-green-600 text-white">
-            <CardContent className="p-3 md:p-4">
-              <div className="text-center">
-                <div className="text-lg md:text-2xl font-bold">
-                  {formatCurrency(
-                    filteredSales.reduce((sum, sale) => {
-                      if (sale.status === "Credit") {
-                        return sum + Number(sale.received_amount || 0)
-                      } else if (sale.status === "Completed") {
-                        return sum + Number(sale.total_amount)
-                      }
-                      return sum
-                    }, 0),
-                  )}
-                </div>
-                <div className="text-xs md:text-sm text-green-100">Received</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-r from-orange-500 to-orange-600 text-white">
-            <CardContent className="p-3 md:p-4">
-              <div className="text-center">
-                <div className="text-lg md:text-2xl font-bold">
-                  {formatCurrency(
-                    filteredSales.reduce((sum, sale) => {
-                      if (sale.status === "Credit") {
-                        return sum + getRemainingAmount(sale)
-                      }
-                      return sum
-                    }, 0),
-                  )}
-                </div>
-                <div className="text-xs md:text-sm text-orange-100">Remaining</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-r from-red-500 to-red-600 text-white">
-            <CardContent className="p-3 md:p-4">
-              <div className="text-center">
-                <div className="text-lg md:text-2xl font-bold">
-                  {formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_cost || 0), 0))}
-                </div>
-                <div className="text-xs md:text-sm text-red-100">Total Cost</div>
-              </div>
-            </CardContent>
-          </Card>
-
-          <Card className="bg-gradient-to-r from-purple-500 to-purple-600 text-white">
-            <CardContent className="p-3 md:p-4">
-              <div className="text-center">
-                <div className="text-lg md:text-2xl font-bold">
-                  {formatCurrency(
-                    filteredSales.reduce((sum, sale) => {
-                      const cost = Number(sale.total_cost || 0)
-                      const revenue = Number(sale.total_amount)
-                      return sum + (revenue - cost)
-                    }, 0),
-                  )}
-                </div>
-                <div className="text-xs md:text-sm text-purple-100">Profit</div>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      {/* Header with controls */}
-      <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-        <div className="flex items-center gap-4">
-          <div className="flex items-center gap-2">
-            <span className="text-lg font-semibold text-gray-700 dark:text-gray-200">
-              {filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}
-            </span>
-            {lastUpdated && (
-              <div className="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400">
-                <span>Updated: {format(new Date(lastUpdated), "HH:mm")}</span>
-                {(isRefreshing || isSilentRefreshing) && <Loader2 className="h-3 w-3 animate-spin" />}
               </div>
             )}
-          </div>
-        </div>
 
-        {/* Action buttons */}
-        <div className="flex flex-wrap gap-3">
-          <Button
-            onClick={handleForcedRefresh}
-            variant="outline"
-            size="default"
-            className="flex items-center gap-2 border-gray-300 hover:bg-gray-50 bg-transparent"
-            disabled={isRefreshing || isLoading}
-          >
-            <RefreshCw className={`h-4 w-4 ${isRefreshing || isLoading ? "animate-spin" : ""}`} />
-            <span>Refresh</span>
-          </Button>
+            {/* Alerts */}
+            {(formAlert || barcodeAlert) && (
+              <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
+                {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
+              </div>
+            )}
 
-          <Button
-            onClick={handlePrintSalesReport}
-            variant="default"
-            size="default"
-            className="flex items-center gap-2 bg-slate-700 hover:bg-slate-800 text-white"
-          >
-            <Printer className="h-4 w-4" />
-            <span>Print</span>
-          </Button>
+            <div className="flex h-full">
+              {/* Products section (70%) */}
+              <div className="w-[70%] flex flex-col border-r border-gray-200 dark:border-gray-700">
+                {/* Barcode scanner */}
+                <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <div className="flex items-center gap-2">
+                    <div className="relative flex-1">
+                      <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                      <Input
+                        placeholder="Scan barcode or search product..."
+                        className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
+                          scanStatus === "processing"
+                            ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
+                            : scanStatus === "success"
+                              ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                              : scanStatus === "error"
+                                ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                                : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
+                        }`}
+                        value={barcodeInput}
+                        onChange={(e) => {
+                          setBarcodeInput(e.target.value)
+                          if (e.target.value.trim() && !isBarcodeProcessing) {
+                            setTimeout(() => {
+                              handleBarcodeInput(e.target.value)
+                            }, 300)
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault()
+                            if (barcodeInput.trim()) {
+                              handleBarcodeInput(e.target.value)
+                            }
+                          }
+                        }}
+                      />
+                      {scanStatus === "processing" && (
+                        <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
+                      )}
+                      {scanStatus === "success" && (
+                        <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
+                      )}
+                      {scanStatus === "error" && (
+                        <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
+                      )}
+                    </div>
+                    <Button
+                      type="button"
+                      onClick={() => {
+                        if (barcodeInput.trim()) {
+                          handleBarcodeInput(barcodeInput)
+                        }
+                      }}
+                      disabled={isBarcodeProcessing || !barcodeInput}
+                      size="sm"
+                      className="bg-blue-600 hover:bg-blue-700 text-white h-9"
+                    >
+                      Add
+                    </Button>
+                  </div>
+                </div>
 
-          <Button
-            onClick={() => setIsNewSaleModalOpen(true)}
-            size="default"
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white"
-          >
-            <Plus className="h-4 w-4" />
-            <span>Add Sale</span>
-          </Button>
-        </div>
+                {/* Products table header */}
+                <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
+                  <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsNewServiceModalOpen(true)}
+                      className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
+                    >
+                      <Wrench className="h-3 w-3" /> Service
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setIsNewProductModalOpen(true)}
+                      className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
+                    >
+                      <Plus className="h-3 w-3" /> Product
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={addProductRow}
+                      className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
+                    >
+                      <Plus className="h-3 w-3" /> Row
+                    </Button>
+                  </div>
+                </div>
+
+                {/* Products table */}
+                <div className="flex-1 overflow-y-auto">
+                  <div className="sticky top-0 z-10 grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
+                    <div className="col-span-3">Product/Service</div>
+                    <div className="col-span-2">Notes</div>
+                    <div className="col-span-1 text-center">Qty</div>
+                    <div className="col-span-2 text-center">Price</div>
+                    <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
+                    <div className="col-span-1 text-center">Total</div>
+                    <div className="col-span-1"></div>
+                  </div>
+
+                  {products.map((product, index) => (
+                    <div
+                      key={product.id}
+                      className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
+                        index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                      } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
+                    >
+                      <div className="col-span-3">
+                        {product.productId && product.productName ? (
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2 flex-1">
+                              {product.isService ? (
+                                <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                              ) : (
+                                <div className="h-4 w-4 flex-shrink-0" />
+                              )}
+                              <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
+                                {product.productName}
+                              </span>
+                            </div>
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
+                              onClick={() => {
+                                updateProductRow(product.id, {
+                                  productId: null,
+                                  productName: "",
+                                  price: 0,
+                                  cost: 0,
+                                  stock: 0,
+                                  total: 0,
+                                  notes: "",
+                                  isService: false,
+                                  serviceId: undefined,
+                                })
+                              }}
+                            >
+                              <ChevronsUpDown className="h-3 w-3" />
+                            </Button>
+                          </div>
+                        ) : (
+                          <ProductSelectSimple
+                            id={`product-select-${product.id}`}
+                            value={product.productId}
+                            onChange={(productId, productName, price, wholesalePrice, stock) =>
+                              handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                            }
+                            onAddNew={() => setIsNewProductModalOpen(true)}
+                            onAddNewService={() => setIsNewServiceModalOpen(true)}
+                            userId={userId}
+                          />
+                        )}
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          placeholder="Notes..."
+                          value={product.notes || ""}
+                          onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                          className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <Input
+                          type="number"
+                          min="1"
+                          value={product.quantity}
+                          onChange={(e) => {
+                            const newQuantity = Number.parseInt(e.target.value) || 0
+                            if (product.stock !== undefined && newQuantity > product.stock) {
+                              setBarcodeAlert({
+                                type: "warning",
+                                message: `Only ${product.stock} units available for ${product.productName}`,
+                              })
+                              updateProductRow(product.id, { quantity: product.stock })
+                            } else {
+                              updateProductRow(product.id, { quantity: newQuantity })
+                            }
+                          }}
+                          className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={product.price}
+                          onChange={(e) =>
+                            updateProductRow(product.id, {
+                              price: Number.parseFloat(e.target.value) || 0,
+                            })
+                          }
+                          className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                        />
+                      </div>
+                      <div className="col-span-2">
+                        {privacyMode ? (
+                          <div className="flex items-center justify-center h-7">
+                            <EyeOff className="h-3 w-3 text-gray-400" />
+                          </div>
+                        ) : (
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={product.cost || 0}
+                            onChange={(e) =>
+                              updateProductRow(product.id, {
+                                cost: Number.parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                          />
+                        )}
+                      </div>
+                      <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
+                        {deviceCurrencyState} {product.total.toFixed(2)}
+                      </div>
+                      <div className="col-span-1 flex justify-center">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeProductRow(product.id)}
+                          disabled={products.length === 1}
+                          className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Sale details section (30%) */}
+              <div className="w-[30%] flex flex-col bg-white dark:bg-gray-800">
+                <div className="p-3 border-b border-gray-200 dark:border-gray-700">
+                  <div className="space-y-3">
+                    {/* Customer */}
+                    <div className="space-y-1">
+                      <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                        <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                        Customer
+                      </Label>
+                      <CustomerSelectSimple
+                        value={customerId}
+                        onChange={(value, name) => {
+                          setCustomerId(value)
+                          if (name) setCustomerName(name)
+                        }}
+                        onAddNew={() => setIsNewCustomerModalOpen(true)}
+                        userId={userId}
+                      />
+                    </div>
+
+                    {/* Status - Full width under customer */}
+                    <div className="space-y-1">
+                      <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                        Status
+                      </Label>
+                      <select
+                        id="status"
+                        className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+                        value={status}
+                        onChange={(e) => setStatus(e.target.value)}
+                      >
+                        <option value="Completed">Completed</option>
+                        <option value="Credit">Credit</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Cancelled">Cancelled</option>
+                      </select>
+                    </div>
+
+                    {/* Staff and Date in a row - half width each */}
+                    <div className="flex gap-2">
+                      <div className="flex flex-col space-y-1" style={{ minWidth: 140, flexShrink: 0 }}>
+                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                          <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
+                          Staff *
+                        </Label>
+                        <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
+                      </div>
+
+                      <div className="flex-1 flex flex-col space-y-1">
+                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                          <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                          Date
+                        </Label>
+                        <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                          <div className="dark:text-white">
+                            <DatePickerField date={date} onDateChange={setDate} />
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Received Amount for Credit */}
+                    {status === "Credit" && (
+                      <div className="space-y-1">
+                        <Label
+                          htmlFor="received_amount"
+                          className="text-xs font-medium text-gray-900 dark:text-gray-200"
+                        >
+                          Received Amount
+                        </Label>
+                        <Input
+                          id="received_amount"
+                          type="number"
+                          min="0"
+                          max={totalAmount}
+                          step="0.01"
+                          value={receivedAmount}
+                          onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                          className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                          placeholder="0.00"
+                        />
+                        <p className="text-xs text-gray-500 dark:text-gray-400">
+                          Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
+                        </p>
+                      </div>
+                    )}
+
+                    {/* Payment Method for Completed */}
+                    {status === "Completed" && (
+                      <div className="space-y-1">
+                        <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                          <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                          Payment Method
+                        </Label>
+                        <RadioGroup
+                          value={paymentMethod}
+                          onValueChange={setPaymentMethod}
+                          className="grid grid-cols-3 gap-1"
+                        >
+                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                            <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
+                            <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                              Cash
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                            <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
+                            <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                              Card
+                            </Label>
+                          </div>
+                          <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                            <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
+                            <Label htmlFor="online" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                              Online
+                            </Label>
+                          </div>
+                        </RadioGroup>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sale summary */}
+                <div className="flex-1 p-3 flex flex-col">
+                  <div className="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
+                    <div className="p-3 space-y-2">
+                      <div className="flex justify-between items-center py-1">
+                        <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
+                        <span className="text-sm text-gray-900 dark:text-gray-100">
+                          {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
+                        </span>
+                      </div>
+
+                      <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
+                        <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
+                        <div className="w-20">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={discountAmount}
+                            onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
+                            className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
+                        <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
+                        <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
+                          {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Complete Sale button */}
+                  <div className="mt-3">
+                    <Button
+                      onClick={handleSubmitSale}
+                      disabled={isSubmitting}
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
+                    >
+                      {isSubmitting ? (
+                        <span className="flex items-center justify-center">
+                          <Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...
+                        </span>
+                      ) : (
+                        <span className="flex items-center justify-center">
+                          <Save className="h-4 w-4 mr-2" /> {isEditMode ? "Update Sale" : "Complete Sale"}
+                        </span>
+                      )}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
       </div>
 
-      {/* Filters Section */}
-      <Card className="dark:bg-gray-800 dark:border-gray-700">
-        <CardContent className="p-4 dark:bg-gray-800">
-          {/* Search Bar */}
-          <div className="relative mb-4">
-            <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input
-              type="search"
-              placeholder="Search sales by customer, ID, status, or amount..."
-              className="pl-8"
-              value={searchTerm}
-              onChange={(e) => dispatch(setSearchTerm(e.target.value))}
-            />
-          </div>
+      {/* Right side - Summary and Sales List (25% width) */}
+      <div className="w-1/4 flex flex-col space-y-3">
+        {/* Summary Cards - 3x2 Grid with Privacy Mode */}
+        <div className="grid grid-cols-3 gap-2">
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
+                <div className="text-sm font-bold text-gray-900 dark:text-gray-100">
+                  {privacyMode
+                    ? getPrivacyValue()
+                    : formatCurrency(filteredSales.reduce((sum, sale) => sum + Number(sale.total_amount), 0))}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Total Sales</div>
+              </div>
+            </CardContent>
+          </Card>
 
-          {/* Quick Filters */}
-          <div className="flex flex-wrap gap-2 mb-4">
-            {/* Date Filters */}
-            <Button
-              onClick={handleTodayFilter}
-              variant={dateFromFilter === format(new Date(), "yyyy-MM-dd") ? "default" : "outline"}
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                dateFromFilter === format(new Date(), "yyyy-MM-dd")
-                  ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <Calendar className="h-4 w-4" />
-              <span>Today</span>
-            </Button>
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
+                <div className="text-sm font-bold text-green-600 dark:text-green-400">
+                  {privacyMode
+                    ? getPrivacyValue()
+                    : formatCurrency(
+                        filteredSales.reduce((sum, sale) => {
+                          if (sale.status === "Credit") {
+                            return sum + Number(sale.received_amount || 0)
+                          } else if (sale.status === "Completed") {
+                            return sum + Number(sale.total_amount)
+                          }
+                          return sum
+                        }, 0),
+                      )}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Received</div>
+              </div>
+            </CardContent>
+          </Card>
 
-            <Button
-              onClick={handleThisWeekFilter}
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                // Check if this week filter is active
-                dateFromFilter &&
-                dateToFilter &&
-                new Date(dateFromFilter).getDay() === 0 && // Starts on Sunday
-                Math.abs(new Date(dateToFilter).getTime() - new Date(dateFromFilter).getTime()) ===
-                  6 * 24 * 60 * 60 * 1000 // 6 days difference
-                  ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <Calendar className="h-4 w-4" />
-              <span>This Week</span>
-            </Button>
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
+                <div className="text-sm font-bold text-orange-600 dark:text-orange-400">
+                  {privacyMode
+                    ? getPrivacyValue()
+                    : formatCurrency(
+                        filteredSales.reduce((sum, sale) => {
+                          if (sale.status === "Credit") {
+                            return sum + getRemainingAmount(sale)
+                          }
+                          return sum
+                        }, 0),
+                      )}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
+              </div>
+            </CardContent>
+          </Card>
 
-            <Button
-              onClick={handleThisMonthFilter}
-              variant="outline"
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                // Check if this month filter is active
-                dateFromFilter &&
-                dateToFilter &&
-                new Date(dateFromFilter).getDate() === 1 && // Starts on 1st
-                new Date(dateToFilter).getMonth() === new Date(dateFromFilter).getMonth() // Same month
-                  ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <Calendar className="h-4 w-4" />
-              <span>This Month</span>
-            </Button>
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
+                <div className="text-sm font-bold text-blue-600 dark:text-blue-400">
+                  {privacyMode
+                    ? getPrivacyValue()
+                    : formatCurrency(
+                        filteredSales.reduce((sum, sale) => {
+                          // Calculate profit as total - cost (assuming cost is available in sale data)
+                          const saleProfit = Number(sale.total_amount) - (Number(sale.total_cost) || 0)
+                          return sum + saleProfit
+                        }, 0),
+                      )}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400">Profit</div>
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Custom Date Range Button */}
-            <Button
-              onClick={openDateFilterModal}
-              variant={dateFromFilter || dateToFilter ? "default" : "outline"}
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                dateFromFilter || dateToFilter
-                  ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <CalendarDays className="h-4 w-4" />
-              <span>Custom Range</span>
-              {(dateFromFilter || dateToFilter) && (
-                <Badge
-                  variant="secondary"
-                  className="ml-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                >
-                  {dateFromFilter && dateToFilter
-                    ? `${format(new Date(dateFromFilter), "MMM d")} - ${format(new Date(dateToFilter), "MMM d")}`
-                    : dateFromFilter
-                      ? `From ${format(new Date(dateFromFilter), "MMM d")}`
-                      : `To ${format(new Date(dateToFilter), "MMM d")}`}
-                </Badge>
-              )}
-            </Button>
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
+                <div className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {privacyMode
+                    ? getPrivacyValue()
+                    : formatCurrency(
+                        filteredSales.reduce((sum, sale) => {
+                          // Calculate COGS (Cost of Goods Sold)
+                          return sum + (Number(sale.total_cost) || 0)
+                        }, 0),
+                      )}
+                </div>
+                <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center justify-center gap-1">
+                  <Settings className="h-3 w-3" />
+                  COGS
+                </div>
+              </div>
+            </CardContent>
+          </Card>
 
-            {/* Amount Filter Button */}
-            <Button
-              onClick={() => setIsAmountFilterModalOpen(true)}
-              variant={minAmountFilter || maxAmountFilter ? "default" : "outline"}
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                minAmountFilter || maxAmountFilter
-                  ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <DollarSign className="h-4 w-4" />
-              <span>Amount</span>
-              {(minAmountFilter || maxAmountFilter) && (
-                <Badge
-                  variant="secondary"
-                  className="ml-1 text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200"
-                >
-                  {minAmountFilter && maxAmountFilter
-                    ? `${minAmountFilter} - ${maxAmountFilter}`
-                    : minAmountFilter
-                      ? `Min: ${minAmountFilter}`
-                      : `Max: ${maxAmountFilter}`}
-                </Badge>
-              )}
-            </Button>
-
-            {/* Status Filter Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+          <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+            <CardContent className="p-2">
+              <div className="text-center">
                 <Button
-                  variant={statusFilter !== "all" ? "default" : "outline"}
+                  onClick={() => setPrivacyMode(!privacyMode)}
+                  variant="ghost"
                   size="sm"
-                  className={`flex items-center gap-2 transition-all duration-200 ${
+                  className="w-full h-full flex flex-col items-center justify-center gap-1 hover:bg-gray-50 dark:hover:bg-gray-700"
+                >
+                  {privacyMode ? (
+                    <EyeOff className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-600 dark:text-gray-400" />
+                  )}
+                  <div className="text-xs text-gray-500 dark:text-gray-400">Privacy</div>
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Search and Controls */}
+        <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+          <CardContent className="p-2">
+            <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
+                <Input
+                  type="search"
+                  placeholder="Search sales..."
+                  className="pl-7 h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
+                  value={searchTerm}
+                  onChange={(e) => dispatch(setSearchTerm(e.target.value))}
+                />
+              </div>
+
+              <div className="flex gap-1">
+                <Button
+                  onClick={handleForcedRefresh}
+                  variant="outline"
+                  size="sm"
+                  className="flex-1 text-xs bg-transparent border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7"
+                  disabled={isRefreshing || isLoading}
+                >
+                  <RefreshCw className={`h-3 w-3 mr-1 ${isRefreshing || isLoading ? "animate-spin" : ""}`} />
+                  Refresh
+                </Button>
+
+                <Button
+                  onClick={handleStatusFilter}
+                  variant="outline"
+                  size="sm"
+                  className={`flex-1 text-xs h-7 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
                     statusFilter !== "all"
-                      ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                      : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
+                      ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400"
+                      : "border-gray-300 dark:border-gray-600"
                   }`}
                 >
-                  <CheckCircle className="h-4 w-4" />
-                  <span>{getStatusDisplayText()}</span>
-                  <ChevronDown className="h-4 w-4" />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-48 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-              >
-                <DropdownMenuItem
-                  onClick={() => dispatch(setStatusFilter("all"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4" />
-                    <span>All Status</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setStatusFilter("completed"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <CheckCircle className="h-4 w-4 text-green-600" />
-                    <span>Completed</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setStatusFilter("credit"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Clock className="h-4 w-4 text-orange-600" />
-                    <span>Credit</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setStatusFilter("cancelled"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <XCircle className="h-4 w-4 text-red-600" />
-                    <span>Cancelled</span>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
+                  <Filter className="h-3 w-3 mr-1" />
 
-            {/* Payment Method Filter Dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
+                  {statusFilter === "all" ? "All" : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
+                </Button>
+              </div>
+
+              {/* Quick date filters */}
+              <div className="flex gap-1">
                 <Button
-                  variant={paymentMethodFilter !== "all" ? "default" : "outline"}
+                  onClick={handleTodayFilter}
+                  variant="outline"
                   size="sm"
-                  className={`flex items-center gap-2 transition-all duration-200 ${
+                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                    isTodayFilterActive()
+                      ? "border-green-500 dark:border-green-400 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400"
+                      : "border-gray-300 dark:border-gray-600"
+                  }`}
+                >
+                  Today
+                </Button>
+                <Button
+                  onClick={handleCustomDateRange}
+                  variant="outline"
+                  size="sm"
+                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
+                    isCustomDateRangeActive()
+                      ? "border-purple-500 dark:border-purple-400 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
+                      : "border-gray-300 dark:border-gray-600"
+                  }`}
+                >
+                  <CalendarDays className="h-3 w-3 mr-1" />
+                  {isCustomDateRangeActive() ? getCustomDateRangeText() : "Custom"}
+                </Button>
+                <Button
+                  onClick={handlePaymentMethodFilter}
+                  variant="outline"
+                  size="sm"
+                  className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
                     paymentMethodFilter !== "all"
-                      ? "bg-blue-600 hover:bg-blue-700 text-white dark:bg-blue-600 dark:hover:bg-blue-700 dark:text-white"
-                      : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
+                      ? "border-orange-500 dark:border-orange-400 bg-orange-50 dark:bg-orange-900/20 text-orange-600 dark:text-orange-400"
+                      : "border-gray-300 dark:border-gray-600"
                   }`}
                 >
-                  <CreditCard className="h-4 w-4" />
-                  <span>{getPaymentMethodDisplayText()}</span>
-                  <ChevronDown className="h-4 w-4" />
+                  {paymentMethodFilter === "all"
+                    ? "All Pay"
+                    : paymentMethodFilter?.charAt(0).toUpperCase() + paymentMethodFilter?.slice(1)}
                 </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent
-                align="start"
-                className="w-48 bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700"
-              >
-                <DropdownMenuItem
-                  onClick={() => dispatch(setPaymentMethodFilter("all"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <div className="w-4 h-4" />
-                    <span>All Payment</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setPaymentMethodFilter("cash"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Banknote className="h-4 w-4 text-green-600" />
-                    <span>Cash</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setPaymentMethodFilter("card"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <CreditCard className="h-4 w-4 text-blue-600" />
-                    <span>Card</span>
-                  </div>
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => dispatch(setPaymentMethodFilter("bank_transfer"))}
-                  className="text-gray-700 hover:bg-gray-100 dark:text-gray-200 dark:hover:bg-gray-700 cursor-pointer"
-                >
-                  <div className="flex items-center gap-2">
-                    <Building className="h-4 w-4 text-purple-600" />
-                    <span>Online</span>
-                  </div>
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-
-            {/* Clear All Filters Button */}
-            <Button
-              onClick={handleClearAllFilters}
-              variant={hasActiveFilters ? "default" : "outline"}
-              size="sm"
-              className={`flex items-center gap-2 transition-all duration-200 ${
-                hasActiveFilters
-                  ? "bg-red-600 hover:bg-red-700 text-white dark:bg-red-600 dark:hover:bg-red-700 dark:text-white"
-                  : "bg-white hover:bg-gray-50 text-gray-700 border-gray-300 dark:bg-gray-700 dark:hover:bg-gray-600 dark:text-gray-200 dark:border-gray-600"
-              }`}
-            >
-              <Filter className="h-4 w-4" />
-              <span>Filters</span>
-              {hasActiveFilters && (
-                <Badge
-                  variant="secondary"
-                  className="ml-1 text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200"
-                >
-                  Clear All
-                </Badge>
-              )}
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Sales List */}
-      <Card className="dark:bg-gray-800 dark:border-gray-700">
-        <CardContent className="p-0 dark:bg-gray-800">
-          {isLoading && sales.length === 0 ? (
-            <div className="p-6">
-              <SalesTableSkeleton />
-            </div>
-          ) : error ? (
-            <div className="text-center py-8 text-red-500 p-6">
-              <div className="flex items-center justify-center gap-2">
-                <AlertCircle className="h-5 w-5" />
-                <span>{error}</span>
               </div>
             </div>
-          ) : filteredSales.length === 0 ? (
-            <div className="text-center py-8 text-gray-500 dark:text-gray-400 p-6">
-              {hasActiveFilters ? "No sales found matching your filters" : "No sales found. Create your first sale!"}
+          </CardContent>
+        </Card>
+
+        {/* Sales List - Compact with Fixed Header */}
+        <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
+          <CardContent className="p-0 h-full flex flex-col">
+            {/* Fixed Header */}
+            <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                  {filteredSales.length} {filteredSales.length === 1 ? "Sale" : "Sales"}
+                </span>
+                {lastUpdated && (
+                  <div className="flex items-center gap-1 text-xs text-gray-500 dark:text-gray-400">
+                    <span>Updated: {format(new Date(lastUpdated), "HH:mm")}</span>
+                    {(isRefreshing || isSilentRefreshing) && <Loader2 className="h-3 w-3 animate-spin" />}
+                  </div>
+                )}
+              </div>
             </div>
-          ) : isMobile ? (
-            // Mobile Card View
-            <div className="p-4">
-              {filteredSales.map((sale, index) => (
-                <SaleCard key={sale.id} sale={sale} index={index} />
-              ))}
-            </div>
-          ) : (
-            // Desktop Table View - Updated column order: Discount before Cost
-            <div className="overflow-x-auto">
-              <Table className="dark:bg-gray-800">
-                <TableHeader>
-                  <TableRow className="bg-gray-50 dark:bg-gray-700 border-b-2 border-gray-200 dark:border-gray-600">
-                    <TableHead className="w-12 font-semibold text-gray-700 dark:text-gray-200">No</TableHead>
-                    <TableHead className="min-w-[160px] font-semibold text-gray-700 dark:text-gray-200">
-                      Sale ID, Date & Staff
-                    </TableHead>
-                    <TableHead className="min-w-[180px] font-semibold text-gray-700 dark:text-gray-200">
-                      Type & Customer
-                    </TableHead>
-                    <TableHead className="min-w-[140px] font-semibold text-gray-700 dark:text-gray-200">
-                      Payment & Status
-                    </TableHead>
-                    <TableHead className="min-w-[100px] font-semibold text-gray-700 dark:text-gray-200">
-                      Amount
-                    </TableHead>
-                    <TableHead className="min-w-[100px] font-semibold text-gray-700 dark:text-gray-200">
-                      Received
-                    </TableHead>
-                    <TableHead className="min-w-[100px] font-semibold text-gray-700 dark:text-gray-200">
-                      Remaining
-                    </TableHead>
-                    <TableHead className="min-w-[80px] font-semibold text-gray-700 dark:text-gray-200">
-                      Discount
-                    </TableHead>
-                    <TableHead className="min-w-[100px] font-semibold text-gray-700 dark:text-gray-200">Cost</TableHead>
-                    <TableHead className="min-w-[100px] font-semibold text-gray-700 dark:text-gray-200">
-                      Profit
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredSales.map((sale, index) => (
-                    <TableRow
-                      key={sale.id}
-                      className={`cursor-pointer transition-all duration-200 border-b border-gray-100 dark:border-gray-700 hover:bg-blue-50 dark:hover:bg-gray-600 hover:shadow-sm ${
-                        index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50/50 dark:bg-gray-700/50"
-                      }`}
-                      onClick={() => handleViewSale(sale)}
-                    >
-                      <TableCell className="font-medium text-gray-600 dark:text-gray-300 py-4">{index + 1}</TableCell>
 
-                      {/* Combined Sale ID, Date & Staff */}
-                      <TableCell className="py-4">
-                        <div className="space-y-1">
-                          <div className="font-semibold text-blue-600 text-sm">#{sale.id}</div>
-                          <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-1">
-                            <Calendar className="h-3 w-3" />
-                            {format(new Date(sale.sale_date), "MMM d, yyyy")}
-                          </div>
-                          {sale.staff_name && (
-                            <div className="text-xs text-gray-600 dark:text-gray-300 flex items-center gap-1">
-                              <User className="h-3 w-3" />
-                              {sale.staff_name}
-                            </div>
-                          )}
-                        </div>
-                      </TableCell>
-
-                      {/* Combined Type & Customer - Type first, customer underneath */}
-                      <TableCell className="py-4">
-                        <div className="space-y-1">
-                          <Badge
-                            variant="outline"
-                            className={`text-xs font-medium ${
-                              sale.sale_type === "service"
-                                ? "bg-emerald-100 text-emerald-700 border-emerald-300"
-                                : "bg-blue-100 text-blue-700 border-blue-300"
-                            }`}
-                          >
-                            {sale.sale_type === "service" ? "Service" : "Product"}
-                          </Badge>
-                          <div className="font-medium text-gray-900 dark:text-gray-100 truncate max-w-[140px] text-sm">
-                            {sale.customer_name || "Walk-in Customer"}
-                          </div>
-                        </div>
-                      </TableCell>
-
-                      {/* Combined Payment & Status */}
-                      <TableCell className="py-4">
-                        <div className="space-y-1">
-                          <Badge
-                            variant="outline"
-                            className="bg-slate-100 text-slate-700 border-slate-300 text-xs font-medium"
-                          >
-                            {getPaymentMethodDisplay(sale)}
-                          </Badge>
-                          <Badge
-                            variant="outline"
-                            className={`text-xs font-medium ${
-                              sale.status === "Completed"
-                                ? "bg-green-100 text-green-700 border-green-300"
-                                : sale.status === "Credit"
-                                  ? "bg-orange-100 text-orange-700 border-orange-300"
-                                  : sale.status === "Cancelled"
-                                    ? "bg-red-100 text-red-700 border-red-300"
-                                    : "bg-yellow-100 text-yellow-700 border-yellow-300"
-                            }`}
-                          >
-                            {sale.status}
-                          </Badge>
-                        </div>
-                      </TableCell>
-
-                      <TableCell className="font-semibold text-gray-900 dark:text-gray-100 py-4">
-                        {formatCurrency(Number(sale.total_amount))}
-                      </TableCell>
-
-                      <TableCell className="py-4">
-                        {sale.status === "Credit" ? (
-                          <span className="text-green-600 font-semibold">
-                            {formatCurrency(Number(sale.received_amount || 0))}
-                          </span>
-                        ) : sale.status === "Completed" ? (
-                          <span className="text-green-600 font-semibold">
-                            {formatCurrency(Number(sale.total_amount))}
-                          </span>
-                        ) : (
-                          <span className="text-gray-400 font-medium">0</span>
-                        )}
-                      </TableCell>
-
-                      <TableCell className="py-4">
-                        {sale.status === "Credit" ? (
-                          getRemainingAmount(sale) > 0 ? (
-                            <span className="text-red-600 font-semibold">
-                              {formatCurrency(getRemainingAmount(sale))}
-                            </span>
-                          ) : (
-                            <span className="text-gray-400 font-medium">0</span>
-                          )
-                        ) : (
-                          <span className="text-gray-400 font-medium">0</span>
-                        )}
-                      </TableCell>
-
-                      {/* Discount column - moved before Cost */}
-                      <TableCell className="py-4 text-purple-600 font-medium">
-                        {formatCurrency(Number(sale.discount || 0))}
-                      </TableCell>
-
-                      {/* Cost column - moved after Discount */}
-                      <TableCell className="py-4">
-                        <span className="text-orange-600 font-semibold">
-                          {formatCurrency(Number(sale.total_cost || 0))}
-                        </span>
-                      </TableCell>
-
-                      <TableCell className="py-4">
-                        <span
-                          className={`font-semibold ${
-                            Number(sale.total_amount) - Number(sale.total_cost || 0) > 0
-                              ? "text-green-600"
-                              : "text-red-600"
-                          }`}
-                        >
-                          {formatCurrency(Number(sale.total_amount) - Number(sale.total_cost || 0))}
-                        </span>
-                      </TableCell>
-                    </TableRow>
+            {/* Scrollable Content */}
+            <div className="flex-1 overflow-y-auto">
+              {isLoading && sales.length === 0 ? (
+                <div className="p-3">
+                  <SalesTableSkeleton />
+                </div>
+              ) : error ? (
+                <div className="text-center py-4 text-red-500 dark:text-red-400 text-xs p-3">
+                  <div className="flex items-center justify-center gap-1">
+                    <AlertCircle className="h-4 w-4" />
+                    <span>{error}</span>
+                  </div>
+                </div>
+              ) : filteredSales.length === 0 ? (
+                <div className="text-center py-4 text-gray-500 dark:text-gray-400 text-xs p-3">
+                  {hasActiveFilters ? "No sales found matching your filters" : "No sales found"}
+                </div>
+              ) : (
+                <div className="p-2">
+                  {filteredSales.slice(0, 20).map((sale, index) => (
+                    <SaleCard key={sale.id} sale={sale} index={index} />
                   ))}
-                </TableBody>
-              </Table>
+                </div>
+              )}
             </div>
-          )}
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      </div>
 
-      {/* Date Filter Modal */}
-      {isDateFilterModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Select Date Range</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsDateFilterModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
+      {/* Date Range Modal */}
+      <Dialog open={isDateRangeModalOpen} onOpenChange={setIsDateRangeModalOpen}>
+        <DialogContent className="max-w-md bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+          <DialogHeader>
+            <DialogTitle className="text-gray-900 dark:text-gray-100">Select Date Range</DialogTitle>
+          </DialogHeader>
+          <div className="py-4 space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">From Date</Label>
+              <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                <DatePickerField date={tempDateFrom} onDateChange={setTempDateFrom} />
               </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">Start Date</label>
-                  <Input
-                    type="date"
-                    value={tempDateFrom}
-                    onChange={(e) => setTempDateFrom(e.target.value)}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">End Date</label>
-                  <Input
-                    type="date"
-                    value={tempDateTo}
-                    onChange={(e) => setTempDateTo(e.target.value)}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-4">
-                  <Button onClick={handleDateFilterApply} className="flex-1">
-                    Apply Filter
-                  </Button>
-                  <Button onClick={handleClearDateFilter} variant="outline" className="flex-1 bg-transparent">
-                    Clear
-                  </Button>
-                </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-900 dark:text-gray-200">To Date</Label>
+              <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                <DatePickerField date={tempDateTo} onDateChange={setTempDateTo} />
               </div>
+            </div>
+            <div className="flex justify-end gap-2 mt-6">
+              <Button
+                variant="outline"
+                onClick={() => setIsDateRangeModalOpen(false)}
+                className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={applyCustomDateRange}
+                className="bg-blue-600 hover:bg-blue-700 text-white"
+                disabled={!tempDateFrom || !tempDateTo}
+              >
+                Apply Range
+              </Button>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Amount Filter Modal */}
-      {isAmountFilterModalOpen && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-lg max-w-md w-full">
-            <div className="p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900 dark:text-white">Filter by Amount</h3>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsAmountFilterModalOpen(false)}
-                  className="text-gray-500 hover:text-gray-700"
-                >
-                  <X className="h-4 w-4" />
-                </Button>
-              </div>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-                    Minimum Amount ({currency})
-                  </label>
-                  <Input
-                    type="number"
-                    placeholder="0.00"
-                    value={tempMinAmount}
-                    onChange={(e) => setTempMinAmount(e.target.value)}
-                    className="w-full"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-200 mb-1">
-                    Maximum Amount ({currency})
-                  </label>
-                  <Input
-                    type="number"
-                    placeholder="0.00"
-                    value={tempMaxAmount}
-                    onChange={(e) => setTempMaxAmount(e.target.value)}
-                    className="w-full"
-                  />
-                </div>
-
-                <div className="flex gap-2 pt-4">
-                  <Button onClick={handleAmountFilterApply} className="flex-1">
-                    Apply Filter
-                  </Button>
-                  <Button onClick={handleClearAmountFilter} variant="outline" className="flex-1 bg-transparent">
-                    Clear
-                  </Button>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+        </DialogContent>
+      </Dialog>
 
       {/* Modals */}
-      <NewSaleModal
-        isOpen={isNewSaleModalOpen}
-        onClose={handleNewSaleModalClose}
+      <NewCustomerModal
+        isOpen={isNewCustomerModalOpen}
+        onClose={() => setIsNewCustomerModalOpen(false)}
+        onCustomerAdded={handleNewCustomer}
         userId={userId}
-        currency={currency || "AED"}
       />
 
-      {selectedSaleId && (
-        <EditSaleModal
-          isOpen={isEditSaleModalOpen}
-          onClose={() => {
-            setIsEditSaleModalOpen(false)
-            // Force refresh after editing
-            handleForcedRefresh()
-          }}
-          saleId={selectedSaleId}
-          userId={userId}
-          currency={currency || "AED"}
-        />
-      )}
+      <NewProductModal
+        isOpen={isNewProductModalOpen}
+        onClose={() => setIsNewProductModalOpen(false)}
+        onSuccess={handleNewProduct}
+        userId={userId}
+      />
+
+      <NewServiceModal
+        isOpen={isNewServiceModalOpen}
+        onClose={() => setIsNewServiceModalOpen(false)}
+        onSuccess={handleNewService}
+        userId={userId}
+      />
 
       <ViewSaleModal
         isOpen={isViewSaleModalOpen}
@@ -1733,7 +2164,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         }}
         saleId={selectedSaleId}
         currency={currency || "AED"}
-        onEdit={handleEditSaleFromView}
+        onEdit={(saleData) => {
+          setIsViewSaleModalOpen(false)
+          loadSaleForEdit(saleData.id)
+        }}
         onDelete={handleDeleteSaleFromView}
         onPrintInvoice={handlePrintInvoiceFromView}
       />

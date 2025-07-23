@@ -291,7 +291,7 @@ export default function HomeTab({ userId, deviceId }: HomeTabProps) {
             <SelectContent>
               <SelectItem value="today">Today</SelectItem>
               <SelectItem value="week">Last 7 Days</SelectItem>
-              <SelectItem value="month">This Month</SelectItem>
+              <SelectItem value="month">Last 30 Days</SelectItem>
               <SelectItem value="quarter">This Quarter</SelectItem>
               <SelectItem value="year">This Year</SelectItem>
             </SelectContent>

@@ -529,7 +529,7 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
   }
 }
 
-// Record purchase adjustments (edits, cancellations, payments)
+// Record purchase adjustments (edits, cancellations, payments, returns)
 export async function recordPurchaseAdjustment(adjustmentData: {
   purchaseId: number
   changeType: "edit" | "cancel" | "payment" | "status_change"
@@ -580,12 +580,22 @@ export async function recordPurchaseAdjustment(adjustmentData: {
         description = `Purchase #${adjustmentData.purchaseId} - No payment change`
       }
     } else if (adjustmentData.changeType === "cancel") {
-      // Cancelled purchases: credit = previous received amount (money coming back)
+      // Cancelled/Returned purchases: credit = previous received amount (money coming back)
       const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
       creditAmount = previousReceived
       debitAmount = 0
-      status = "Cancelled"
-      description = `Purchase #${adjustmentData.purchaseId} - Cancelled - Credit ${previousReceived}`
+
+      // Check if this is a return (status change from paid/credit to cancelled)
+      const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
+      const newStatus = adjustmentData.newValues.status?.toLowerCase() || ""
+
+      if ((previousStatus === "paid" || previousStatus === "credit") && newStatus === "cancelled") {
+        status = "Returned"
+        description = `Purchase #${adjustmentData.purchaseId} - RETURNED - Credit ${previousReceived} - Stock removed`
+      } else {
+        status = "Cancelled"
+        description = `Purchase #${adjustmentData.purchaseId} - Cancelled - Credit ${previousReceived}`
+      }
     } else {
       // Edit adjustments: handle based on received amount change
       if (receivedDiff > 0) {

@@ -57,9 +57,10 @@ export async function getComprehensiveDashboardData(
         previousStartDate = new Date(now.getFullYear() - 1, 0, 1)
         previousEndDate = new Date(startDate.getTime() - 1)
         break
-      default: // month
-        startDate = new Date(now.getFullYear(), now.getMonth(), 1)
-        previousStartDate = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+      default: // month (last 30 days)
+        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000)
+        startDate.setHours(0, 0, 0, 0)
+        previousStartDate = new Date(startDate.getTime() - 30 * 24 * 60 * 60 * 1000)
         previousEndDate = new Date(startDate.getTime() - 1)
     }
 
@@ -485,10 +486,10 @@ export async function getComprehensiveDashboardData(
           current.setDate(current.getDate() + 1)
         }
       } else if (period === "month") {
-        // Fill daily data for the month
-        while (current <= now && current.getMonth() === startDate.getMonth()) {
+        // Fill daily data for the last 30 days
+        while (current <= now) {
           dateRange.push({
-            period: current.getDate().toString(),
+            period: current.toLocaleDateString("en-US", { month: "short", day: "numeric" }),
             period_date: new Date(current),
             income: 0,
             expenses: 0,

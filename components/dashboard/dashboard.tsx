@@ -318,7 +318,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           <AnimatedThemeToggle />
 
           {/* Add Sale Button */}
-          <Button
+          {/* <Button
             onClick={handleHeaderSaleClick}
             variant="outline"
             size="sm"
@@ -326,7 +326,7 @@ export function Dashboard({ mockMode = false }: DashboardProps) {
           >
             <Plus className="h-4 w-4" />
             <span className="hidden sm:inline">Add Sale</span>
-          </Button>
+          </Button> */}
 
           {/* Staff Dropdown */}
           <StaffHeaderDropdown deviceId={device?.id || null} userId={user?.id || null} />
