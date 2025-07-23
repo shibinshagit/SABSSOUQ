@@ -22,13 +22,14 @@ import {
   Edit,
   Printer,
   Trash2,
+  RotateCcw,
 } from "lucide-react"
 import { useToast } from "@/components/ui/use-toast"
 import { format } from "date-fns"
 import { useSelector } from "react-redux"
 import { selectDeviceCurrency } from "@/store/slices/deviceSlice"
 import { printSalesReceipt } from "@/lib/receipt-utils"
-import { getSaleDetails } from "@/app/actions/sale-actions"
+import { getSaleDetails, updateSale } from "@/app/actions/sale-actions"
 
 interface ViewSaleModalProps {
   isOpen: boolean
@@ -195,6 +196,91 @@ export default function ViewSaleModal({
         onDelete(saleId)
         onClose()
       }
+    }
+  }
+
+  // Add this after the handleDelete function
+  const handleReturn = async () => {
+    if (!saleData || !saleId) return
+
+    // Only allow returns for completed sales
+    if (saleData.status !== "Completed") {
+      toast({
+        title: "Cannot Return Sale",
+        description: "Only completed sales can be returned",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const confirmReturn = window.confirm(
+      "Are you sure you want to return this sale? This will:\n" +
+        "• Change the sale status to Cancelled\n" +
+        "• Restore product stock\n" +
+        "• Create accounting adjustments\n" +
+        "This action cannot be undone.",
+    )
+
+    if (!confirmReturn) return
+
+    try {
+      setIsLoading(true)
+
+      // Prepare return data - change status to Cancelled
+      const returnData = {
+        id: saleId,
+        customerId: saleData.customer_id,
+        items: saleItems.map((item: any) => ({
+          id: item.id,
+          productId: item.product_id,
+          quantity: item.quantity,
+          price: item.price,
+          cost: item.actual_cost || item.cost || 0,
+          notes: item.notes || "",
+        })),
+        paymentStatus: "Cancelled", // Change to cancelled
+        paymentMethod: saleData.payment_method || "Cash",
+        saleDate: saleData.sale_date,
+        discount: saleData.discount || 0,
+        receivedAmount: 0, // Set to 0 for cancelled sales
+        deviceId: saleData.device_id,
+        userId: saleData.created_by,
+        staffId: saleData.staff_id,
+      }
+
+      console.log("Processing sale return:", returnData)
+
+      const result = await updateSale(returnData)
+
+      if (result.success) {
+        toast({
+          title: "Sale Returned Successfully",
+          description: "The sale has been cancelled and stock has been restored",
+          variant: "default",
+        })
+
+        // Refresh the sale data to show updated status
+        const refreshResult = await getSaleDetails(saleId)
+        if (refreshResult.success && refreshResult.data) {
+          setSaleData(refreshResult.data.sale)
+          setSaleItems(refreshResult.data.items || [])
+        }
+      } else {
+        toast({
+          title: "Return Failed",
+          description: result.message || "Failed to process sale return",
+          variant: "destructive",
+        })
+      }
+    } catch (error) {
+      console.error("Error processing sale return:", error)
+      toast({
+        title: "Return Error",
+        description: "An error occurred while processing the return",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -468,6 +554,17 @@ export default function ViewSaleModal({
               >
                 <Edit className="h-4 w-4" />
                 <span>Edit</span>
+              </Button>
+
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={handleReturn}
+                disabled={isLoading || !saleData || saleData.status !== "Completed"}
+                className="flex items-center space-x-2 bg-transparent border-orange-300 dark:border-orange-600 text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20 transition-colors disabled:opacity-50"
+              >
+                <RotateCcw className="h-4 w-4" />
+                <span>Return</span>
               </Button>
 
               <Button

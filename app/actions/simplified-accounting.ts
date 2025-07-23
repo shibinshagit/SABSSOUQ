@@ -284,15 +284,30 @@ export async function recordSaleAdjustment(adjustmentData: {
         debitAmount += Math.abs(receivedDiff)
       }
 
-      // Handle status changes for COGS
+      // Handle status changes for COGS and returns
       const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
       const newStatus = adjustmentData.newValues.status?.toLowerCase() || ""
 
-      if (previousStatus === "cancelled" && newStatus !== "cancelled") {
+      // Special handling for RETURNS (completed -> cancelled)
+      if (previousStatus === "completed" && newStatus === "cancelled") {
+        // This is a RETURN - include negative COGS to reverse the original cost
+        costAmount = -previousCogs
+
+        // For returns, we need to refund the full received amount
+        const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
+        if (previousReceived > 0) {
+          debitAmount = previousReceived // Full refund
+          creditAmount = 0 // No income from return
+        }
+
+        console.log(
+          `Processing RETURN: Sale #${adjustmentData.saleId} - Refunding ${previousReceived}, Reversing COGS ${previousCogs}`,
+        )
+      } else if (previousStatus === "cancelled" && newStatus !== "cancelled") {
         // Changing from cancelled to active status - include COGS
         costAmount = newCogs
       } else if (previousStatus !== "cancelled" && newStatus === "cancelled") {
-        // Changing to cancelled - include negative COGS
+        // Changing to cancelled (but not from completed) - include negative COGS
         costAmount = -previousCogs
       }
 
@@ -309,24 +324,33 @@ export async function recordSaleAdjustment(adjustmentData: {
         }
       }
 
-      // Update description to show actual changes
+      // Update description to show actual changes and returns
       const descriptionParts = [`Sale #${adjustmentData.saleId} - Updated`]
 
-      // Only add discount change to description if there's an actual change
-      if (discountDiff !== 0) {
-        const changeText = discountDiff > 0 ? `+${discountDiff}` : `${discountDiff}`
-        descriptionParts.push(`Discount change: ${changeText}`)
-      }
+      // Special description for returns
+      if (previousStatus === "completed" && newStatus === "cancelled") {
+        descriptionParts[0] = `Sale #${adjustmentData.saleId} - RETURNED`
+        descriptionParts.push(`Full refund processed`)
+        descriptionParts.push(`COGS reversed: ${previousCogs}`)
+      } else {
+        // Only add discount change to description if there's an actual change
+        if (discountDiff !== 0) {
+          const changeText = discountDiff > 0 ? `+${discountDiff}` : `${discountDiff}`
+          descriptionParts.push(`Discount change: ${changeText}`)
+        }
 
-      if (previousStatus !== newStatus) {
-        descriptionParts.push(`Status: ${previousStatus} → ${newStatus}`)
+        if (previousStatus !== newStatus) {
+          descriptionParts.push(`Status: ${previousStatus} → ${newStatus}`)
+        }
       }
 
       description = descriptionParts.join(" | ")
-      status = "Updated"
+      status = previousStatus === "completed" && newStatus === "cancelled" ? "Returned" : "Updated"
 
-      // REMOVED: The check that skipped transaction creation
-      // Now we always create a transaction if there are any changes
+      // Always create a transaction for returns or if there are any changes
+      console.log(
+        `Sale adjustment summary: Debit=${debitAmount}, Credit=${creditAmount}, Cost=${costAmount}, Status=${status}`,
+      )
     } else if (adjustmentData.changeType === "payment") {
       // Payment adjustments: handle credit/debit based on amount change
       if (receivedDiff > 0) {
