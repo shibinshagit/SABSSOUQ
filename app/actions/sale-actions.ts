@@ -119,6 +119,17 @@ async function createStockHistoryEntry(
       return { success: true, message: "Stock history table not available" }
     }
 
+    // ------------------------------------------------------------------
+    // Ensure the table has the columns we need (change_type, quantity_change)
+    // ------------------------------------------------------------------
+    try {
+      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS change_type VARCHAR(50)`
+      await sql`ALTER TABLE stock_history ADD COLUMN IF NOT EXISTS quantity_change INTEGER`
+    } catch (colErr) {
+      console.error("Error ensuring stock_history required columns:", colErr)
+      // Let execution continue – if the column already exists this will be a harmless notice
+    }
+
     // Check for required columns
     const columnCheck = await sql`
       SELECT 
@@ -129,7 +140,7 @@ async function createStockHistoryEntry(
     const hasSaleId = columnCheck[0]?.has_sale_id || false
     const hasPurchaseId = columnCheck[0]?.has_purchase_id || false
 
-    // Insert stock history entry
+    // Insert stock history entry with enhanced change types
     if (hasSaleId && hasPurchaseId) {
       // Both columns exist - use appropriate one based on reference type
       if (referenceType === "sale") {
@@ -158,7 +169,7 @@ async function createStockHistoryEntry(
     }
 
     console.log(
-      `Stock history created for product ${productId}: ${changeType} ${quantity} units (Sale #${referenceId})`,
+      `Stock history created for product ${productId}: ${changeType} ${quantity} units (${referenceType} #${referenceId})`,
     )
     return { success: true, message: "Stock history created successfully" }
   } catch (error) {
@@ -1133,26 +1144,27 @@ export async function updateSale(saleData: any) {
         isNowCompleted,
         isNowCancelled,
         statusChanged: changes.statusChanged,
+        isReturn: wasCompleted && isNowCancelled, // This is a return
       })
 
       // Handle status-based stock changes first
       if (changes.statusChanged) {
         if (wasCompleted && !wasCancelled && isNowCancelled) {
-          // Changing from completed to cancelled - restore all stock for products only
-          console.log("Sale cancelled - restoring stock for all items")
+          // This is a RETURN - Changing from completed to cancelled - restore all stock for products only
+          console.log("Processing SALE RETURN - restoring stock for all items")
           for (const item of existingItems) {
             const stockResult = await updateProductStock(item.product_id, item.quantity, "add")
             if (stockResult.success) {
-              // Create stock history entry for cancellation
+              // Create stock history entry for return
               await createStockHistoryEntry(
                 item.product_id,
-                "sale_cancelled",
+                "sale_returned",
                 item.quantity,
                 saleData.id,
                 "sale",
-                `Sale #${saleData.id} cancelled - stock restored`,
+                `Sale #${saleData.id} returned - stock restored`,
               )
-              console.log(`Stock restored for product ${item.product_id}: +${item.quantity}`)
+              console.log(`Stock restored for returned product ${item.product_id}: +${item.quantity}`)
             }
           }
         } else if (wasCancelled && isNowCompleted) {
@@ -1321,6 +1333,19 @@ export async function updateSale(saleData: any) {
 
       // 8. Create accounting entry only if there are actual financial changes
       try {
+        // Generate appropriate description for returns
+        let adjustmentDescription = `Sale #${saleData.id} updated with changes`
+
+        if (
+          changes.statusChanged &&
+          changes.originalStatus.toLowerCase() === "completed" &&
+          changes.newStatus.toLowerCase() === "cancelled"
+        ) {
+          adjustmentDescription = `Sale #${saleData.id} RETURNED - Status changed from ${changes.originalStatus} to ${changes.newStatus} - Stock restored`
+        } else if (changes.statusChanged) {
+          adjustmentDescription = `Sale #${saleData.id} status changed from ${changes.originalStatus} to ${changes.newStatus}`
+        }
+
         const accountingResult = await recordSaleAdjustment({
           saleId: saleData.id,
           changeType: "consolidated_edit",
@@ -1342,7 +1367,7 @@ export async function updateSale(saleData: any) {
           },
           deviceId: saleData.deviceId,
           userId: saleData.userId,
-          description: `Sale #${saleData.id} updated with changes`,
+          description: adjustmentDescription,
           adjustmentDate: new Date(),
         })
 
