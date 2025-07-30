@@ -88,41 +88,64 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }, [fieldErrors])
 
-  // Reset form when modal opens
-  useEffect(() => {
-    if (isOpen) {
-      setFormData({
-        name: "",
-        companyName: "",
-        category: "",
-        categoryId: null,
-        description: "",
-        price: "",
-        wholesalePrice: "",
-        msp: "",
-        stock: "",
-        shelf: "",
-        barcode: "",
-      })
-      setSelectedCategory(null)
-      setSelectedImage(null)
-      setImagePreview(null)
-      setError(null)
-      setFieldErrors({})
-      fetchCategories()
+useEffect(() => {
+  const initializeForm = async () => {
+    setFormData({
+      name: "",
+      companyName: "",
+      category: "",
+      categoryId: null,
+      description: "",
+      price: "",
+      wholesalePrice: "",
+      stock: "",
+      barcode: "",
+    })
+    setSelectedCategory(null)
+    setError(null)
+    setFieldErrors({})
 
-      // Fetch currency
-      const fetchCurrency = async () => {
-        try {
-          const deviceCurrency = await getDeviceCurrency(userId || 1)
-          setCurrency(deviceCurrency)
-        } catch (err) {
-          console.error("Error fetching currency:", err)
-        }
+    setIsLoadingCategories(true)
+
+    try {
+      // Fetch categories
+      const result = await getCategories(userId)
+      if (result.success) {
+        setCategories(result.data)
+        setFilteredCategories(result.data)
+        console.log("Categories loaded for userId:", userId, result.data)
+      } else {
+        toast({
+          title: "Error",
+          description: result.message || "Failed to load categories",
+          variant: "destructive",
+        })
       }
-      fetchCurrency()
+    } catch (error) {
+      console.error("Error fetching categories:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load categories",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingCategories(false)
     }
-  }, [isOpen, userId])
+
+    // Fetch currency
+    try {
+      const deviceCurrency = await getDeviceCurrency(userId || 1)
+      setCurrency(deviceCurrency)
+    } catch (err) {
+      console.error("Error fetching currency:", err)
+    }
+  }
+
+  if (isOpen) {
+    initializeForm()
+  }
+}, [isOpen, userId])
+
 
   // Filter categories based on search query
   useEffect(() => {
@@ -152,160 +175,86 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }, [isAddingNewCategory])
 
-  const fetchCategories = async () => {
-    setIsLoadingCategories(true)
-    setCategorySearchQuery("")
-    try {
-      const result = await getCategories(userId)
-      if (result.success) {
-        setCategories(result.data)
-        setFilteredCategories(result.data)
-        console.log("Categories loaded for userId:", userId, result.data)
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load categories",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error fetching categories:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load categories",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingCategories(false)
-    }
-  }
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target
     setFormData((prev) => ({ ...prev, [name]: value }))
   }
 
-  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (file) {
-      // Validate file type
-      if (!file.type.startsWith("image/")) {
-        toast({
-          title: "Error",
-          description: "Please select a valid image file",
-          variant: "destructive",
-        })
-        return
-      }
-
-      // Validate file size (max 5MB)
-      if (file.size > 5 * 1024 * 1024) {
-        toast({
-          title: "Error",
-          description: "Image size should be less than 5MB",
-          variant: "destructive",
-        })
-        return
-      }
-
-      setSelectedImage(file)
-
-      // Create preview
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        setImagePreview(e.target?.result as string)
-      }
-      reader.readAsDataURL(file)
-    }
-  }
-
-  const removeImage = () => {
-    setSelectedImage(null)
-    setImagePreview(null)
-    if (fileInputRef.current) {
-      fileInputRef.current.value = ""
-    }
-  }
-
   const handleAddNewCategory = async () => {
-    if (!newCategoryName.trim()) {
-      toast({
-        title: "Error",
-        description: "Category name cannot be empty",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setIsSubmitting(true)
-    try {
-      const result = await createCategory({
-        name: newCategoryName.trim(),
-        userId: userId,
-      })
-
-      if (result.success && result.data) {
-        // Add to categories list
-        setCategories((prev) => {
-          // Check if category already exists
-          const exists = prev.some((cat) => cat.id === result.data.id)
-          if (!exists) {
-            return [...prev, result.data]
-          }
-          return prev
-        })
-
-        // Set as selected category
-        setSelectedCategory(result.data)
-        setFormData({
-          ...formData,
-          category: result.data.name,
-          categoryId: result.data.id,
-        })
-
-        toast({
-          title: "Success",
-          description: `Category "${result.data.name}" added successfully`,
-        })
-
-        // Reset state
-        setNewCategoryName("")
-        setIsAddingNewCategory(false)
-        setIsCategoryDialogOpen(false)
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to add category",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error adding category:", error)
-      toast({
-        title: "Error",
-        description: "An unexpected error occurred",
-        variant: "destructive",
-      })
-    } finally {
-      setIsSubmitting(false)
-    }
+  if (!newCategoryName.trim()) {
+    toast({
+      title: "Error",
+      description: "Category name cannot be empty",
+      variant: "destructive",
+    })
+    return
   }
+
+  setIsSubmitting(true)
+  try {
+    const result = await createCategory({
+      name: newCategoryName.trim(),
+      userId: userId,
+    })
+
+    if (result.success && result.data) {
+      setCategories((prev) => {
+        const exists = prev.some((cat) => cat.id === result.data.id)
+        return exists ? prev : [...prev, result.data]
+      })
+
+      setSelectedCategory(result.data)
+      setFormData((prev) => ({
+        ...prev,
+        category: result.data.name,
+        categoryId: result.data.id,
+      }))
+
+      toast({
+        title: "Success",
+        description: `Category "${result.data.name}" added successfully`,
+      })
+
+      setNewCategoryName("")
+      setIsAddingNewCategory(false)
+      setIsCategoryDialogOpen(false)
+    } else {
+      toast({
+        title: "Error",
+        description: result.message || "Failed to add category",
+        variant: "destructive",
+      })
+    }
+  } catch (error) {
+    console.error("Error adding category:", error)
+    toast({
+      title: "Error",
+      description: "An unexpected error occurred",
+      variant: "destructive",
+    })
+  } finally {
+    setIsSubmitting(false)
+  }
+}
+
+
 
   const handleCategorySelect = (category: Category) => {
-    setSelectedCategory(category)
-    setFormData({
-      ...formData,
-      category: category.name,
-      categoryId: category.id,
-    })
-    setIsCategoryDialogOpen(false)
+  setSelectedCategory(category)
+  setFormData((prev) => ({
+    ...prev,
+    category: category.name,
+    categoryId: category.id,
+  }))
+  setIsCategoryDialogOpen(false)
 
-    toast({
-      title: "Category Selected",
-      description: `"${category.name}" has been selected`,
-      duration: 2000,
-    })
-  }
+  toast({
+    title: "Category Selected",
+    description: `"${category.name}" has been selected`,
+    duration: 2000,
+  })
+}
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
