@@ -89,7 +89,10 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
   }, [fieldErrors])
 
 useEffect(() => {
+  if (!isOpen) return
+
   const initializeForm = async () => {
+    // Reset form
     setFormData({
       name: "",
       companyName: "",
@@ -98,39 +101,19 @@ useEffect(() => {
       description: "",
       price: "",
       wholesalePrice: "",
+      msp: "",
       stock: "",
+      shelf: "",
       barcode: "",
     })
     setSelectedCategory(null)
+    setSelectedImage(null)
+    setImagePreview(null)
     setError(null)
     setFieldErrors({})
 
-    setIsLoadingCategories(true)
-
-    try {
-      // Fetch categories
-      const result = await getCategories(userId)
-      if (result.success) {
-        setCategories(result.data)
-        setFilteredCategories(result.data)
-        console.log("Categories loaded for userId:", userId, result.data)
-      } else {
-        toast({
-          title: "Error",
-          description: result.message || "Failed to load categories",
-          variant: "destructive",
-        })
-      }
-    } catch (error) {
-      console.error("Error fetching categories:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load categories",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoadingCategories(false)
-    }
+    // Fetch categories
+    fetchCategories()
 
     // Fetch currency
     try {
@@ -141,10 +124,9 @@ useEffect(() => {
     }
   }
 
-  if (isOpen) {
-    initializeForm()
-  }
+  initializeForm()
 }, [isOpen, userId])
+
 
 
   // Filter categories based on search query
