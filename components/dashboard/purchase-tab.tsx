@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -57,6 +57,9 @@ interface PurchaseTabProps {
   mockMode?: boolean
 }
 
+// Constants for performance optimization
+const CACHE_DURATION = 5 * 60 * 1000 // 5 minutes
+
 export default function PurchaseTab({
   userId,
   isAddModalOpen = false,
@@ -80,86 +83,127 @@ export default function PurchaseTab({
   const { toast } = useToast()
   const [showAddModal, setShowAddModal] = useState(isAddModalOpen)
 
-  // Add state for view and edit modals
+  // Modal states
   const [selectedPurchaseId, setSelectedPurchaseId] = useState<number | null>(null)
   const [isViewModalOpen, setIsViewModalOpen] = useState(false)
   const [isEditModalOpen, setIsEditModalOpen] = useState(false)
 
-  // Date filter modal state
+  // Filter modal states
   const [isDateFilterModalOpen, setIsDateFilterModalOpen] = useState(false)
   const [tempDateFrom, setTempDateFrom] = useState("")
   const [tempDateTo, setTempDateTo] = useState("")
-
-  // Amount filter modal state
   const [isAmountFilterModalOpen, setIsAmountFilterModalOpen] = useState(false)
   const [tempMinAmount, setTempMinAmount] = useState("")
   const [tempMaxAmount, setTempMaxAmount] = useState("")
-
-  // Supplier search state
   const [supplierSearchTerm, setSupplierSearchTerm] = useState("")
 
-  // Check if data needs refresh (older than 5 minutes)
-  const needsRefresh = () => {
-    if (!lastUpdated) return true
-    return Date.now() - lastUpdated > 5 * 60 * 1000 // 5 minutes
-  }
+  // Use refs to track initialization and prevent duplicate requests
+  const isInitializedRef = useRef(false)
+  const isLoadingRef = useRef(false)
 
-  // Format currency with the device's currency
-  const formatCurrency = (amount: number | string | null | undefined) => {
+  // Stable callbacks that don't change on every render
+  const needsRefresh = useCallback(() => {
+    if (!lastUpdated) return true
+    return Date.now() - lastUpdated > CACHE_DURATION
+  }, [lastUpdated])
+
+  const formatCurrency = useCallback((amount: number | string | null | undefined) => {
     const numAmount = typeof amount === "number" ? amount : Number.parseFloat(String(amount || 0))
     const validAmount = isNaN(numAmount) ? 0 : numAmount
     return `${currency} ${validAmount.toFixed(2)}`
-  }
+  }, [currency])
 
-  useEffect(() => {
-    setShowAddModal(isAddModalOpen)
-  }, [isAddModalOpen])
+  // Memoized computed values
+  const hasActiveFilters = useMemo(() => {
+    return (
+      filters.statusFilter !== "all" ||
+      filters.supplierFilter !== "all" ||
+      filters.paymentMethodFilter !== "all" ||
+      filters.deliveryStatusFilter !== "all" ||
+      filters.dateRangeFilter !== "all" ||
+      filters.dateFromFilter ||
+      filters.dateToFilter ||
+      filters.minAmountFilter ||
+      filters.maxAmountFilter ||
+      filters.searchTerm.trim()
+    )
+  }, [filters])
 
+  const getLastUpdatedText = useMemo(() => {
+    if (!lastUpdated) return ""
+    const now = Date.now()
+    const diff = now - lastUpdated
+    const minutes = Math.floor(diff / 60000)
+
+    if (minutes < 1) return "Just updated"
+    if (minutes === 1) return "1 minute ago"
+    if (minutes < 60) return `${minutes} minutes ago`
+
+    const hours = Math.floor(minutes / 60)
+    if (hours === 1) return "1 hour ago"
+    if (hours < 24) return `${hours} hours ago`
+
+    return "More than a day ago"
+  }, [lastUpdated])
+
+  // Memoized filtered suppliers
+  const filteredSuppliers = useMemo(() => {
+    return suppliers.filter((supplier) =>
+      supplier.toLowerCase().includes(supplierSearchTerm.toLowerCase())
+    )
+  }, [suppliers, supplierSearchTerm])
+
+  // Modal state synchronization - only update if different
   useEffect(() => {
-    if (isAddModalOpen) {
-      setShowAddModal(true)
+    if (isAddModalOpen !== showAddModal) {
+      setShowAddModal(isAddModalOpen)
     }
-  }, [isAddModalOpen])
+  }, [isAddModalOpen]) // Removed showAddModal from deps to prevent loops
 
-  // Initial data fetch
+  // FIXED: Single initial data fetch effect with proper dependency management
   useEffect(() => {
-    if (deviceId && !mockMode) {
-      // Fetch currency and suppliers
-      dispatch(fetchCurrency(userId))
-      dispatch(fetchSuppliers())
+    if (!deviceId || mockMode || isInitializedRef.current || isLoadingRef.current) {
+      return
+    }
 
-      // Check if cache is expired (older than 5 minutes)
-      if (needsRefresh()) {
-        // Clear cache and fetch fresh data
-        dispatch(clearCache())
-        dispatch(fetchPurchases({ deviceId, forceRefresh: true }))
-      } else if (purchases.length > 0) {
-        // Data is fresh, just apply filters
-        dispatch(applyFilters())
-      } else {
-        // No cached data, fetch normally
-        dispatch(fetchPurchases({ deviceId }))
+    const loadInitialData = async () => {
+      isLoadingRef.current = true
+      
+      try {
+        // Fetch currency and suppliers in parallel
+        await Promise.all([
+          dispatch(fetchCurrency(userId)),
+          dispatch(fetchSuppliers())
+        ])
+
+        // Handle purchases based on cache status
+        if (needsRefresh()) {
+          dispatch(clearCache())
+          await dispatch(fetchPurchases({ deviceId, forceRefresh: true }))
+        } else if (purchases.length === 0) {
+          await dispatch(fetchPurchases({ deviceId }))
+        }
+
+        isInitializedRef.current = true
+      } catch (error) {
+        console.error('Error loading initial data:', error)
+      } finally {
+        isLoadingRef.current = false
       }
     }
-  }, [deviceId, userId, mockMode, dispatch])
 
-  // Apply filters when filter values change
+    loadInitialData()
+  }, [deviceId, userId, mockMode, dispatch]) // Removed needsRefresh and purchases.length
+
+  // FIXED: Apply filters effect - only when initialized and filters actually change
   useEffect(() => {
-    dispatch(applyFilters())
-  }, [filters, dispatch])
+    if (isInitializedRef.current && purchases.length > 0) {
+      dispatch(applyFilters())
+    }
+  }, [filters, dispatch]) // Removed purchases.length dependency
 
-  // Remove the search debouncing effect since we're searching locally now
-  // useEffect(() => {
-  //   const timeoutId = setTimeout(() => {
-  //     if (deviceId && filters.searchTerm !== "") {
-  //       dispatch(fetchPurchases({ deviceId, searchTerm: filters.searchTerm, isBackground: true }))
-  //     }
-  //   }, 500)
-
-  //   return () => clearTimeout(timeoutId)
-  // }, [filters.searchTerm, deviceId, dispatch])
-
-  const handleDelete = async (id: number) => {
+  // Stable event handlers with useCallback
+  const handleDelete = useCallback(async (id: number) => {
     if (!deviceId) {
       toast({
         title: "Error",
@@ -194,47 +238,44 @@ export default function PurchaseTab({
         })
       }
     }
-  }
+  }, [deviceId, dispatch, toast])
 
-  const handleView = (id: number) => {
+  const handleView = useCallback((id: number) => {
     setSelectedPurchaseId(id)
     setIsViewModalOpen(true)
-  }
+  }, [])
 
-  const handleEdit = (id: number) => {
+  const handleEdit = useCallback((id: number) => {
     setSelectedPurchaseId(id)
     setIsEditModalOpen(true)
-  }
+  }, [])
 
-  const handleRefresh = () => {
-    if (deviceId) {
-      // Always clear cache and force refresh
+  const handleRefresh = useCallback(() => {
+    if (deviceId && !isLoadingRef.current) {
       dispatch(clearCache())
       dispatch(fetchPurchases({ deviceId, forceRefresh: true }))
     }
-  }
+  }, [deviceId, dispatch])
 
-  const getStatusBadge = (status: string) => {
+  // Stable status badge functions
+  const getStatusBadge = useCallback((status: string) => {
     switch (status.toLowerCase()) {
       case "paid":
-        return <Badge className="bg-green-500">Paid</Badge>
-      case "credit":
-        return <Badge className="bg-yellow-500">Credit</Badge>
-      case "cancelled":
-        return <Badge className="bg-red-500">Cancelled</Badge>
       case "completed":
       case "received":
         return <Badge className="bg-green-500">Paid</Badge>
+      case "credit":
       case "pending":
         return <Badge className="bg-yellow-500">Credit</Badge>
+      case "cancelled":
       case "partial":
         return <Badge className="bg-red-500">Cancelled</Badge>
       default:
         return <Badge>{status}</Badge>
     }
-  }
+  }, [])
 
-  const getPurchaseStatusBadge = (status: string) => {
+  const getPurchaseStatusBadge = useCallback((status: string) => {
     if (!status) return <Badge variant="outline">Delivered</Badge>
 
     switch (status.toLowerCase()) {
@@ -245,9 +286,9 @@ export default function PurchaseTab({
       default:
         return <Badge variant="outline">{status}</Badge>
     }
-  }
+  }, [])
 
-  const getPaymentMethodIcon = (method: string) => {
+  const getPaymentMethodIcon = useCallback((method: string) => {
     if (!method) return null
 
     switch (method.toLowerCase()) {
@@ -260,42 +301,10 @@ export default function PurchaseTab({
       default:
         return null
     }
-  }
+  }, [])
 
-  const hasActiveFilters = () => {
-    return (
-      filters.statusFilter !== "all" ||
-      filters.supplierFilter !== "all" ||
-      filters.paymentMethodFilter !== "all" ||
-      filters.deliveryStatusFilter !== "all" ||
-      filters.dateRangeFilter !== "all" ||
-      filters.dateFromFilter ||
-      filters.dateToFilter ||
-      filters.minAmountFilter ||
-      filters.maxAmountFilter ||
-      filters.searchTerm.trim()
-    )
-  }
-
-  const getLastUpdatedText = () => {
-    if (!lastUpdated) return ""
-    const now = Date.now()
-    const diff = now - lastUpdated
-    const minutes = Math.floor(diff / 60000)
-
-    if (minutes < 1) return "Just updated"
-    if (minutes === 1) return "1 minute ago"
-    if (minutes < 60) return `${minutes} minutes ago`
-
-    const hours = Math.floor(minutes / 60)
-    if (hours === 1) return "1 hour ago"
-    if (hours < 24) return `${hours} hours ago`
-
-    return "More than a day ago"
-  }
-
-  // Handle Today filter
-  const handleTodayFilter = () => {
+  // Date filter handlers with stable callbacks
+  const handleTodayFilter = useCallback(() => {
     const today = new Date()
     const formattedDate = format(today, "yyyy-MM-dd")
 
@@ -306,10 +315,9 @@ export default function PurchaseTab({
         dateToFilter: formattedDate,
       }),
     )
-  }
+  }, [dispatch])
 
-  // Handle This Week filter
-  const handleThisWeekFilter = () => {
+  const handleThisWeekFilter = useCallback(() => {
     const today = new Date()
     const startOfWeek = new Date(today.setDate(today.getDate() - today.getDay()))
     const endOfWeek = new Date(today.setDate(today.getDate() - today.getDay() + 6))
@@ -321,10 +329,9 @@ export default function PurchaseTab({
         dateToFilter: format(endOfWeek, "yyyy-MM-dd"),
       }),
     )
-  }
+  }, [dispatch])
 
-  // Handle This Month filter
-  const handleThisMonthFilter = () => {
+  const handleThisMonthFilter = useCallback(() => {
     const today = new Date()
     const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
     const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
@@ -336,17 +343,16 @@ export default function PurchaseTab({
         dateToFilter: format(endOfMonth, "yyyy-MM-dd"),
       }),
     )
-  }
+  }, [dispatch])
 
-  // Open date filter modal
-  const openDateFilterModal = () => {
+  // Modal handlers with stable callbacks
+  const openDateFilterModal = useCallback(() => {
     setTempDateFrom(filters.dateFromFilter || "")
     setTempDateTo(filters.dateToFilter || "")
     setIsDateFilterModalOpen(true)
-  }
+  }, [filters.dateFromFilter, filters.dateToFilter])
 
-  // Handle date filter apply
-  const handleDateFilterApply = () => {
+  const handleDateFilterApply = useCallback(() => {
     dispatch(
       setFilters({
         dateFromFilter: tempDateFrom,
@@ -355,10 +361,9 @@ export default function PurchaseTab({
       }),
     )
     setIsDateFilterModalOpen(false)
-  }
+  }, [dispatch, tempDateFrom, tempDateTo])
 
-  // Clear date filter
-  const handleClearDateFilter = () => {
+  const handleClearDateFilter = useCallback(() => {
     dispatch(
       setFilters({
         dateFromFilter: "",
@@ -369,10 +374,9 @@ export default function PurchaseTab({
     setTempDateFrom("")
     setTempDateTo("")
     setIsDateFilterModalOpen(false)
-  }
+  }, [dispatch])
 
-  // Handle amount filter apply
-  const handleAmountFilterApply = () => {
+  const handleAmountFilterApply = useCallback(() => {
     dispatch(
       setFilters({
         minAmountFilter: tempMinAmount,
@@ -380,10 +384,9 @@ export default function PurchaseTab({
       }),
     )
     setIsAmountFilterModalOpen(false)
-  }
+  }, [dispatch, tempMinAmount, tempMaxAmount])
 
-  // Clear amount filter
-  const handleClearAmountFilter = () => {
+  const handleClearAmountFilter = useCallback(() => {
     dispatch(
       setFilters({
         minAmountFilter: "",
@@ -393,52 +396,308 @@ export default function PurchaseTab({
     setTempMinAmount("")
     setTempMaxAmount("")
     setIsAmountFilterModalOpen(false)
-  }
+  }, [dispatch])
 
-  // Get status display text
-  const getStatusDisplayText = () => {
+  // Display text functions - moved to useMemo for stability
+  const getStatusDisplayText = useMemo(() => {
     switch (filters.statusFilter) {
-      case "paid":
-        return "Paid"
-      case "credit":
-        return "Credit"
-      case "cancelled":
-        return "Cancelled"
-      default:
-        return "All Status"
+      case "paid": return "Paid"
+      case "credit": return "Credit"
+      case "cancelled": return "Cancelled"
+      default: return "All Status"
     }
-  }
+  }, [filters.statusFilter])
 
-  // Get payment method display text
-  const getPaymentMethodDisplayText = () => {
+  const getPaymentMethodDisplayText = useMemo(() => {
     switch (filters.paymentMethodFilter) {
-      case "cash":
-        return "Cash"
-      case "card":
-        return "Card"
-      case "online":
-        return "Online"
-      default:
-        return "All Payment"
+      case "cash": return "Cash"
+      case "card": return "Card"
+      case "online": return "Online"
+      default: return "All Payment"
     }
-  }
+  }, [filters.paymentMethodFilter])
 
-  // Get delivery status display text
-  const getDeliveryStatusDisplayText = () => {
+  const getDeliveryStatusDisplayText = useMemo(() => {
     switch (filters.deliveryStatusFilter) {
-      case "delivered":
-        return "Delivered"
-      case "pending":
-        return "Pending"
-      default:
-        return "All Delivery"
+      case "delivered": return "Delivered"
+      case "pending": return "Pending"
+      default: return "All Delivery"
     }
-  }
+  }, [filters.deliveryStatusFilter])
 
-  // Filter suppliers based on search term
-  const filteredSuppliers = suppliers.filter((supplier) =>
-    supplier.toLowerCase().includes(supplierSearchTerm.toLowerCase()),
-  )
+  // FIXED: Modal close handlers - prevent unnecessary data fetching
+  const handleAddModalClose = useCallback(() => {
+    setShowAddModal(false)
+    if (onModalClose) onModalClose()
+    // Only refresh if we're not in mock mode and have device ID
+    if (deviceId && !mockMode && !isLoadingRef.current) {
+      dispatch(fetchPurchases({ deviceId }))
+    }
+  }, [onModalClose, deviceId, mockMode, dispatch])
+
+  const handleEditModalClose = useCallback(() => {
+    setIsEditModalOpen(false)
+    // Only refresh if we're not in mock mode and have device ID
+    if (deviceId && !mockMode && !isLoadingRef.current) {
+      dispatch(fetchPurchases({ deviceId }))
+    }
+  }, [deviceId, mockMode, dispatch])
+
+  const handlePurchaseAdded = useCallback(() => {
+    if (deviceId && !mockMode && !isLoadingRef.current) {
+      dispatch(fetchPurchases({ deviceId }))
+    }
+  }, [deviceId, mockMode, dispatch])
+
+  const handlePurchaseUpdated = useCallback(() => {
+    if (deviceId && !mockMode && !isLoadingRef.current) {
+      dispatch(fetchPurchases({ deviceId }))
+    }
+  }, [deviceId, mockMode, dispatch])
+
+  // Print handler with stable callback
+  const handlePrint = useCallback(() => {
+    if (filteredPurchases.length === 0) {
+      toast({
+        title: "No Data",
+        description: "No purchases to print",
+        variant: "destructive",
+      })
+      return
+    }
+
+    const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
+    if (!printWindow) {
+      alert("Please allow pop-ups to print")
+      return
+    }
+
+    const currentDate = new Date().toLocaleDateString("en-GB")
+    const currentTime = new Date().toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })
+
+    // Calculate summary data
+    const totalAmount = filteredPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0)
+    const paidAmount = filteredPurchases.reduce((sum, p) => sum + Number(p.received_amount || 0), 0)
+    const outstandingAmount = filteredPurchases.reduce((sum, p) => {
+      const total = Number(p.total_amount || 0)
+      const paid = Number(p.received_amount || 0)
+      return sum + Math.max(0, total - paid)
+    }, 0)
+
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Purchase Report - SABS SOUQ</title>
+        <style>
+          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+          
+          @media print {
+            @page { size: A4; margin: 0.5cm; }
+            .no-print { display: none !important; }
+          }
+          
+          * { margin: 0; padding: 0; box-sizing: border-box; }
+          
+          body {
+            font-family: 'Inter', sans-serif;
+            font-size: 12px;
+            line-height: 1.4;
+            color: #1f2937;
+          }
+          
+          .header {
+            text-align: center;
+            margin-bottom: 1rem;
+            padding: 1rem;
+            border-bottom: 2px solid #000;
+          }
+          
+          .company-name {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 0.25rem;
+          }
+          
+          .report-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin: 0.5rem 0;
+            color: #dc2626;
+          }
+          
+          .report-info {
+            font-size: 0.8rem;
+            color: #6b7280;
+          }
+          
+          .summary {
+            display: flex;
+            justify-content: space-around;
+            margin: 1rem 0;
+            padding: 0.75rem;
+            background: #f9fafb;
+            border: 1px solid #e5e7eb;
+          }
+          
+          .summary-item {
+            text-align: center;
+          }
+          
+          .summary-label {
+            font-size: 0.7rem;
+            color: #6b7280;
+            text-transform: uppercase;
+          }
+          
+          .summary-value {
+            font-size: 0.9rem;
+            font-weight: 600;
+            color: #111827;
+          }
+          
+          .table-container {
+            margin: 1rem 0;
+          }
+          
+          table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 0.75rem;
+          }
+          
+          th, td {
+            padding: 0.4rem 0.3rem;
+            text-align: left;
+            border: 1px solid #d1d5db;
+          }
+          
+          th {
+            background: #f3f4f6;
+            font-weight: 600;
+            color: #374151;
+            text-transform: uppercase;
+            font-size: 0.65rem;
+          }
+          
+          .text-right { text-align: right; }
+          .text-center { text-align: center; }
+          
+          .status-paid { color: #10b981; font-weight: 500; }
+          .status-credit { color: #f59e0b; font-weight: 500; }
+          .status-cancelled { color: #ef4444; font-weight: 500; }
+          
+          .print-buttons {
+            text-align: center;
+            margin: 1rem 0;
+          }
+          
+          .print-button {
+            padding: 0.5rem 1rem;
+            margin: 0 0.5rem;
+            background: #2563eb;
+            color: white;
+            border: none;
+            border-radius: 0.25rem;
+            cursor: pointer;
+            font-family: inherit;
+          }
+          
+          .print-button:hover { background: #1d4ed8; }
+          .print-button.secondary { background: #6b7280; }
+          .print-button.secondary:hover { background: #4b5563; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <div class="company-name">SABS SOUQ</div>
+          <div style="font-size: 0.7rem; color: #6b7280;">Karama, opp. Al Rayan Hotel, Ajman - UAE | +971 566770889</div>
+          <div class="report-title">Purchase Report</div>
+          <div class="report-info">Generated on ${currentDate} at ${currentTime}</div>
+        </div>
+        
+        <div class="summary">
+          <div class="summary-item">
+            <div class="summary-label">Total Purchases</div>
+            <div class="summary-value">${filteredPurchases.length}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">Total Amount</div>
+            <div class="summary-value">${formatCurrency(totalAmount)}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">Paid Amount</div>
+            <div class="summary-value">${formatCurrency(paidAmount)}</div>
+          </div>
+          <div class="summary-item">
+            <div class="summary-label">Outstanding</div>
+            <div class="summary-value">${formatCurrency(outstandingAmount)}</div>
+          </div>
+        </div>
+        
+        <div class="table-container">
+          <table>
+            <thead>
+              <tr>
+                <th style="width: 5%;">#</th>
+                <th style="width: 8%;">ID</th>
+                <th style="width: 20%;">Supplier</th>
+                <th style="width: 12%;">Date</th>
+                <th style="width: 12%;">Amount</th>
+                <th style="width: 12%;">Paid</th>
+                <th style="width: 12%;">Remaining</th>
+                <th style="width: 10%;">Status</th>
+                <th style="width: 9%;">Delivery</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${filteredPurchases
+                .map((purchase, index) => {
+                  const totalAmount = Number(purchase.total_amount || 0)
+                  const paidAmount = Number(purchase.received_amount || 0)
+                  const remainingAmount = Math.max(0, totalAmount - paidAmount)
+
+                  return `
+                  <tr>
+                    <td class="text-center">${index + 1}</td>
+                    <td class="text-center">#${purchase.id}</td>
+                    <td>${purchase.supplier || "N/A"}</td>
+                    <td>${new Date(purchase.purchase_date).toLocaleDateString("en-GB")}</td>
+                    <td class="text-right">${formatCurrency(totalAmount)}</td>
+                    <td class="text-right">${formatCurrency(paidAmount)}</td>
+                    <td class="text-right">${formatCurrency(remainingAmount)}</td>
+                    <td class="status-${purchase.status?.toLowerCase() || "pending"}">${purchase.status || "Pending"}</td>
+                    <td>${purchase.purchase_status || "Pending"}</td>
+                  </tr>
+                `
+                })
+                .join("")}
+            </tbody>
+          </table>
+        </div>
+        
+        <div class="print-buttons no-print">
+          <button class="print-button" onclick="window.print()">Print Report</button>
+          <button class="print-button secondary" onclick="window.close()">Close</button>
+        </div>
+        
+        <script>
+          window.onload = function() {
+            setTimeout(function() {
+              window.print();
+            }, 500);
+          };
+        </script>
+      </body>
+      </html>
+    `)
+
+    printWindow.document.close()
+  }, [filteredPurchases, formatCurrency, toast])
 
   return (
     <div className="space-y-4 dark:bg-gray-900">
@@ -471,7 +730,7 @@ export default function PurchaseTab({
                     disabled
                   >
                     <Clock className="h-4 w-4 flex-shrink-0" />
-                    <span className="hidden sm:inline">{getLastUpdatedText()}</span>
+                    <span className="hidden sm:inline">{getLastUpdatedText}</span>
                     <span className="sm:hidden">Updated</span>
                     {isBackgroundRefreshing && <Loader2 className="h-3 w-3 animate-spin ml-1" />}
                   </Button>
@@ -491,257 +750,7 @@ export default function PurchaseTab({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => {
-                    // Handle print functionality for purchase data
-                    if (filteredPurchases.length === 0) {
-                      toast({
-                        title: "No Data",
-                        description: "No purchases to print",
-                        variant: "destructive",
-                      })
-                      return
-                    }
-
-                    // Create print window with purchase data
-                    const printWindow = window.open("", "_blank", "width=800,height=900,scrollbars=yes")
-                    if (!printWindow) {
-                      alert("Please allow pop-ups to print")
-                      return
-                    }
-
-                    const formatCurrency = (amount: number | string | null | undefined) => {
-                      const numAmount = typeof amount === "number" ? amount : Number.parseFloat(String(amount || 0))
-                      const validAmount = isNaN(numAmount) ? 0 : numAmount
-                      return `${currency} ${validAmount.toFixed(2)}`
-                    }
-
-                    const currentDate = new Date().toLocaleDateString("en-GB")
-                    const currentTime = new Date().toLocaleTimeString("en-US", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      hour12: true,
-                    })
-
-                    printWindow.document.write(`
-                      <!DOCTYPE html>
-                      <html>
-                      <head>
-                        <title>Purchase Report - SABS SOUQ</title>
-                        <style>
-                          @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
-                          
-                          @media print {
-                            @page { size: A4; margin: 0.5cm; }
-                            .no-print { display: none !important; }
-                          }
-                          
-                          * { margin: 0; padding: 0; box-sizing: border-box; }
-                          
-                          body {
-                            font-family: 'Inter', sans-serif;
-                            font-size: 12px;
-                            line-height: 1.4;
-                            color: #1f2937;
-                          }
-                          
-                          .header {
-                            text-align: center;
-                            margin-bottom: 1rem;
-                            padding: 1rem;
-                            border-bottom: 2px solid #000;
-                          }
-                          
-                          .company-name {
-                            font-size: 1.5rem;
-                            font-weight: 700;
-                            margin-bottom: 0.25rem;
-                          }
-                          
-                          .report-title {
-                            font-size: 1.1rem;
-                            font-weight: 600;
-                            margin: 0.5rem 0;
-                            color: #dc2626;
-                          }
-                          
-                          .report-info {
-                            font-size: 0.8rem;
-                            color: #6b7280;
-                          }
-                          
-                          .summary {
-                            display: flex;
-                            justify-content: space-around;
-                            margin: 1rem 0;
-                            padding: 0.75rem;
-                            background: #f9fafb;
-                            border: 1px solid #e5e7eb;
-                          }
-                          
-                          .summary-item {
-                            text-align: center;
-                          }
-                          
-                          .summary-label {
-                            font-size: 0.7rem;
-                            color: #6b7280;
-                            text-transform: uppercase;
-                          }
-                          
-                          .summary-value {
-                            font-size: 0.9rem;
-                            font-weight: 600;
-                            color: #111827;
-                          }
-                          
-                          .table-container {
-                            margin: 1rem 0;
-                          }
-                          
-                          table {
-                            width: 100%;
-                            border-collapse: collapse;
-                            font-size: 0.75rem;
-                          }
-                          
-                          th, td {
-                            padding: 0.4rem 0.3rem;
-                            text-align: left;
-                            border: 1px solid #d1d5db;
-                          }
-                          
-                          th {
-                            background: #f3f4f6;
-                            font-weight: 600;
-                            color: #374151;
-                            text-transform: uppercase;
-                            font-size: 0.65rem;
-                          }
-                          
-                          .text-right { text-align: right; }
-                          .text-center { text-align: center; }
-                          
-                          .status-paid { color: #10b981; font-weight: 500; }
-                          .status-credit { color: #f59e0b; font-weight: 500; }
-                          .status-cancelled { color: #ef4444; font-weight: 500; }
-                          
-                          .print-buttons {
-                            text-align: center;
-                            margin: 1rem 0;
-                          }
-                          
-                          .print-button {
-                            padding: 0.5rem 1rem;
-                            margin: 0 0.5rem;
-                            background: #2563eb;
-                            color: white;
-                            border: none;
-                            border-radius: 0.25rem;
-                            cursor: pointer;
-                            font-family: inherit;
-                          }
-                          
-                          .print-button:hover { background: #1d4ed8; }
-                          .print-button.secondary { background: #6b7280; }
-                          .print-button.secondary:hover { background: #4b5563; }
-                        </style>
-                      </head>
-                      <body>
-                        <div class="header">
-                          <div class="company-name">SABS SOUQ</div>
-                          <div style="font-size: 0.7rem; color: #6b7280;">Karama, opp. Al Rayan Hotel, Ajman - UAE | +971 566770889</div>
-                          <div class="report-title">Purchase Report</div>
-                          <div class="report-info">Generated on ${currentDate} at ${currentTime}</div>
-                        </div>
-                        
-                        <div class="summary">
-                          <div class="summary-item">
-                            <div class="summary-label">Total Purchases</div>
-                            <div class="summary-value">${filteredPurchases.length}</div>
-                          </div>
-                          <div class="summary-item">
-                            <div class="summary-label">Total Amount</div>
-                            <div class="summary-value">${formatCurrency(
-                              filteredPurchases.reduce((sum, p) => sum + Number(p.total_amount || 0), 0),
-                            )}</div>
-                          </div>
-                          <div class="summary-item">
-                            <div class="summary-label">Paid Amount</div>
-                            <div class="summary-value">${formatCurrency(
-                              filteredPurchases.reduce((sum, p) => sum + Number(p.received_amount || 0), 0),
-                            )}</div>
-                          </div>
-                          <div class="summary-item">
-                            <div class="summary-label">Outstanding</div>
-                            <div class="summary-value">${formatCurrency(
-                              filteredPurchases.reduce((sum, p) => {
-                                const total = Number(p.total_amount || 0)
-                                const paid = Number(p.received_amount || 0)
-                                return sum + Math.max(0, total - paid)
-                              }, 0),
-                            )}</div>
-                          </div>
-                        </div>
-                        
-                        <div class="table-container">
-                          <table>
-                            <thead>
-                              <tr>
-                                <th style="width: 5%;">#</th>
-                                <th style="width: 8%;">ID</th>
-                                <th style="width: 20%;">Supplier</th>
-                                <th style="width: 12%;">Date</th>
-                                <th style="width: 12%;">Amount</th>
-                                <th style="width: 12%;">Paid</th>
-                                <th style="width: 12%;">Remaining</th>
-                                <th style="width: 10%;">Status</th>
-                                <th style="width: 9%;">Delivery</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              ${filteredPurchases
-                                .map((purchase, index) => {
-                                  const totalAmount = Number(purchase.total_amount || 0)
-                                  const paidAmount = Number(purchase.received_amount || 0)
-                                  const remainingAmount = Math.max(0, totalAmount - paidAmount)
-
-                                  return `
-                                  <tr>
-                                    <td class="text-center">${index + 1}</td>
-                                    <td class="text-center">#${purchase.id}</td>
-                                    <td>${purchase.supplier || "N/A"}</td>
-                                    <td>${new Date(purchase.purchase_date).toLocaleDateString("en-GB")}</td>
-                                    <td class="text-right">${formatCurrency(totalAmount)}</td>
-                                    <td class="text-right">${formatCurrency(paidAmount)}</td>
-                                    <td class="text-right">${formatCurrency(remainingAmount)}</td>
-                                    <td class="status-${purchase.status?.toLowerCase() || "pending"}">${purchase.status || "Pending"}</td>
-                                    <td>${purchase.purchase_status || "Pending"}</td>
-                                  </tr>
-                                `
-                                })
-                                .join("")}
-                            </tbody>
-                          </table>
-                        </div>
-                        
-                        <div class="print-buttons no-print">
-                          <button class="print-button" onclick="window.print()">Print Report</button>
-                          <button class="print-button secondary" onclick="window.close()">Close</button>
-                        </div>
-                        
-                        <script>
-                          window.onload = function() {
-                            setTimeout(function() {
-                              window.print();
-                            }, 500);
-                          };
-                        </script>
-                      </body>
-                      </html>
-                    `)
-
-                    printWindow.document.close()
-                  }}
+                  onClick={handlePrint}
                   className="flex items-center gap-2 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800 hover:bg-red-50 dark:hover:bg-red-900/20 text-xs sm:text-sm whitespace-nowrap"
                 >
                   <FileText className="h-4 w-4 flex-shrink-0" />
@@ -843,7 +852,7 @@ export default function PurchaseTab({
                     className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
                     <CheckCircle className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getStatusDisplayText()}</span>
+                    <span className="truncate">{getStatusDisplayText}</span>
                     <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -884,7 +893,7 @@ export default function PurchaseTab({
                     className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
                     <CreditCard className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getPaymentMethodDisplayText()}</span>
+                    <span className="truncate">{getPaymentMethodDisplayText}</span>
                     <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -925,7 +934,7 @@ export default function PurchaseTab({
                     className="flex items-center justify-center gap-1 sm:gap-2 dark:text-blue-400 text-xs sm:text-sm min-w-0"
                   >
                     <Truck className="h-4 w-4 flex-shrink-0" />
-                    <span className="truncate">{getDeliveryStatusDisplayText()}</span>
+                    <span className="truncate">{getDeliveryStatusDisplayText}</span>
                     <ChevronDown className="h-4 w-4 flex-shrink-0" />
                   </Button>
                 </DropdownMenuTrigger>
@@ -1005,7 +1014,7 @@ export default function PurchaseTab({
               </DropdownMenu>
 
               {/* Clear All Filters Button */}
-              {hasActiveFilters() && (
+              {hasActiveFilters && (
                 <Button
                   onClick={() => dispatch(clearAllFilters())}
                   variant="outline"
@@ -1155,22 +1164,11 @@ export default function PurchaseTab({
       {/* Modals */}
       <NewPurchaseModal
         isOpen={showAddModal}
-        onClose={() => {
-          setShowAddModal(false)
-          if (onModalClose) onModalClose()
-          // Refresh the purchases list after adding a new purchase
-          if (deviceId) {
-            dispatch(fetchPurchases({ deviceId }))
-          }
-        }}
+        onClose={handleAddModalClose}
         userId={userId}
         deviceId={deviceId}
         currency={currency}
-        onPurchaseAdded={() => {
-          if (deviceId) {
-            dispatch(fetchPurchases({ deviceId }))
-          }
-        }}
+        onPurchaseAdded={handlePurchaseAdded}
       />
 
       {/* View Purchase Modal */}
@@ -1192,22 +1190,12 @@ export default function PurchaseTab({
       {selectedPurchaseId && (
         <EditPurchaseModal
           isOpen={isEditModalOpen}
-          onClose={() => {
-            setIsEditModalOpen(false)
-            // Refresh the purchases list after editing
-            if (deviceId) {
-              dispatch(fetchPurchases({ deviceId }))
-            }
-          }}
+          onClose={handleEditModalClose}
           purchaseId={selectedPurchaseId}
           userId={userId}
           deviceId={deviceId}
           currency={currency}
-          onPurchaseUpdated={() => {
-            if (deviceId) {
-              dispatch(fetchPurchases({ deviceId }))
-            }
-          }}
+          onPurchaseUpdated={handlePurchaseUpdated}
         />
       )}
 
@@ -1316,7 +1304,7 @@ export default function PurchaseTab({
               </div>
             </div>
           </div>
-        </div>
+        </div>  
       )}
     </div>
   )

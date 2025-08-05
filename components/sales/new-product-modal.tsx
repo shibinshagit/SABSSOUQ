@@ -88,6 +88,69 @@ export default function NewProductModal({ isOpen, onClose, onSuccess, userId }: 
     }
   }, [fieldErrors])
 
+  // Fetch categories function
+  const fetchCategories = async () => {
+    setIsLoadingCategories(true)
+    try {
+      const result = await getCategories(userId || 1)
+      if (result.success && result.data) {
+        setCategories(result.data)
+      }
+    } catch (error) {
+      console.error("Error fetching categories:", error)
+      toast({
+        title: "Error",
+        description: "Failed to load categories",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingCategories(false)
+    }
+  }
+
+  // Image handling functions
+  const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+
+    // Validate file size (5MB limit)
+    if (file.size > 5 * 1024 * 1024) {
+      toast({
+        title: "Error",
+        description: "Image size must be less than 5MB",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Validate file type
+    if (!file.type.startsWith('image/')) {
+      toast({
+        title: "Error",
+        description: "Please select a valid image file",
+        variant: "destructive",
+      })
+      return
+    }
+
+    setSelectedImage(file)
+    
+    // Create preview URL
+    const reader = new FileReader()
+    reader.onload = (e) => {
+      setImagePreview(e.target?.result as string)
+    }
+    reader.readAsDataURL(file)
+  }
+
+  const removeImage = () => {
+    setSelectedImage(null)
+    setImagePreview(null)
+    if (fileInputRef.current) {
+      fileInputRef.current.value = ""
+    }
+  }
+
 useEffect(() => {
   if (!isOpen) return
 
