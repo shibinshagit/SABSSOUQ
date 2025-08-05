@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,6 +50,14 @@ export default function EditPurchaseModal({
   onPurchaseUpdated,
 }: EditPurchaseModalProps) {
   const dispatch = useDispatch()
+  const { showNotification } = useNotification()
+  
+  // Refs to track loading states and prevent duplicate requests
+  const isLoadingRef = useRef(false)
+  const isSubmittingRef = useRef(false)
+  const lastPurchaseIdRef = useRef<number | null>(null)
+  
+  // Form state
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [localCurrency, setLocalCurrency] = useState(currency)
@@ -70,188 +78,33 @@ export default function EditPurchaseModal({
       wholesalePrice: 0,
     },
   ])
-  const [subtotal, setSubtotal] = useState(0)
   const [taxRate, setTaxRate] = useState(0)
-  const [taxAmount, setTaxAmount] = useState(0)
   const [discountAmount, setDiscountAmount] = useState(0)
-  const [totalAmount, setTotalAmount] = useState(0)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [formAlert, setFormAlert] = useState<{ type: "success" | "error" | "warning"; message: string } | null>(null)
   const [activeProductRowId, setActiveProductRowId] = useState<string | null>(null)
-
-  // Modals for adding new product
   const [isNewProductModalOpen, setIsNewProductModalOpen] = useState(false)
 
-  const { showNotification } = useNotification()
+  // Memoized calculations to prevent unnecessary recalculations
+  const calculations = useMemo(() => {
+    const subtotal = products.reduce((sum, product) => sum + product.total, 0)
+    const taxAmount = subtotal * (taxRate / 100)
+    const totalAmount = Number(subtotal) + Number(taxAmount) - Number(discountAmount)
+    
+    return { subtotal, taxAmount, totalAmount }
+  }, [products, taxRate, discountAmount])
 
-  // Fetch purchase details when modal opens
-  useEffect(() => {
-    const fetchPurchaseDetails = async () => {
-      if (!purchaseId || !isOpen) return
+  const { subtotal, taxAmount, totalAmount } = calculations
 
-      try {
-        setIsLoading(true)
-
-        // Get currency
-        try {
-          const deviceCurrency = await getDeviceCurrency(userId)
-          setLocalCurrency(deviceCurrency)
-        } catch (err) {
-          console.error("Error fetching currency:", err)
-          setLocalCurrency("QAR") // Fallback
-        }
-
-        const result = await getPurchaseDetails(purchaseId)
-
-        if (result.success) {
-          const { purchase, items } = result.data
-
-          // Set purchase data
-          setDate(new Date(purchase.purchase_date))
-          setSupplier(purchase.supplier || "")
-
-          // Map old status values to new ones if needed
-          if (purchase.status === "Pending") {
-            setStatus("Credit")
-          } else if (purchase.status === "Received") {
-            setStatus("Paid")
-          } else if (purchase.status === "Partial") {
-            setStatus("Cancelled")
-          } else {
-            setStatus(purchase.status || "Credit")
-          }
-
-          setPurchaseStatus(purchase.purchase_status || "Delivered")
-          setPaymentMethod(purchase.payment_method || "Cash")
-          setTotalAmount(Number(purchase.total_amount) || 0)
-          setReceivedAmount(Number(purchase.received_amount) || 0)
-
-          // Calculate subtotal from items
-          const calculatedSubtotal = items.reduce((sum: number, item: any) => sum + item.quantity * item.price, 0)
-          setSubtotal(calculatedSubtotal)
-
-          // Estimate tax and discount
-          if (calculatedSubtotal > 0) {
-            const estimatedTaxAmount = Math.round((purchase.total_amount - calculatedSubtotal) * 100) / 100
-            if (estimatedTaxAmount > 0) {
-              setTaxAmount(estimatedTaxAmount)
-              setTaxRate(Math.round((estimatedTaxAmount / calculatedSubtotal) * 100 * 100) / 100)
-              setDiscountAmount(0)
-            } else {
-              setTaxAmount(0)
-              setTaxRate(0)
-              setDiscountAmount(Math.abs(estimatedTaxAmount))
-            }
-          }
-
-          // Set product rows
-          const productRows = items.map((item: any) => ({
-            id: crypto.randomUUID(),
-            productId: item.product_id,
-            productName: item.product_name,
-            quantity: item.quantity,
-            price: item.price,
-            total: item.quantity * item.price,
-            originalItemId: item.id,
-            wholesalePrice: item.wholesale_price || item.price,
-          }))
-
-          setProducts(
-            productRows.length > 0
-              ? productRows
-              : [
-                  {
-                    id: crypto.randomUUID(),
-                    productId: null,
-                    productName: "",
-                    quantity: 1,
-                    price: 0,
-                    total: 0,
-                    wholesalePrice: 0,
-                  },
-                ],
-          )
-        } else {
-          setError(result.message || "Failed to load purchase details")
-          showNotification("error", result.message || "Failed to load purchase details")
-        }
-      } catch (error) {
-        console.error("Error fetching purchase details:", error)
-        setError("An error occurred while loading purchase details")
-        showNotification("error", "An error occurred while loading purchase details")
-      } finally {
-        setIsLoading(false)
-      }
-    }
-
-    fetchPurchaseDetails()
-  }, [purchaseId, isOpen, userId, showNotification])
-
-  // Reset form when modal closes
-  useEffect(() => {
-    if (!isOpen) {
-      setDate(new Date())
-      setSupplier("")
-      setStatus("Credit")
-      setPurchaseStatus("Delivered")
-      setPaymentMethod("Cash")
-      setReceivedAmount(0)
-      setProducts([
-        {
-          id: crypto.randomUUID(),
-          productId: null,
-          productName: "",
-          quantity: 1,
-          price: 0,
-          total: 0,
-          wholesalePrice: 0,
-        },
-      ])
-      setSubtotal(0)
-      setTaxRate(0)
-      setTaxAmount(0)
-      setDiscountAmount(0)
-      setTotalAmount(0)
-      setFormAlert(null)
-      setActiveProductRowId(null)
-      setIsLoading(true)
-      setError(null)
-    }
-  }, [isOpen])
-
-  // Calculate totals whenever products, tax rate, or discount changes
-  useEffect(() => {
-    const newSubtotal = products.reduce((sum, product) => sum + product.total, 0)
-    setSubtotal(newSubtotal)
-
-    const newTaxAmount = newSubtotal * (taxRate / 100)
-    setTaxAmount(newTaxAmount)
-
-    const newTotalAmount = Number(newSubtotal) + Number(newTaxAmount) - Number(discountAmount)
-    setTotalAmount(newTotalAmount)
-
-    // Auto-adjust received amount based on status
-    if (status === "Paid") {
-      setReceivedAmount(newTotalAmount)
-    } else if (status === "Cancelled") {
-      setReceivedAmount(0)
-    }
-  }, [products, taxRate, discountAmount, status])
-
-  // Handle status change
-  const handleStatusChange = (newStatus: string) => {
-    setStatus(newStatus)
-    if (newStatus === "Paid") {
-      setReceivedAmount(totalAmount)
-    } else if (newStatus === "Cancelled") {
-      setReceivedAmount(0)
-    }
-  }
-
-  // Add a new product row
-  const addProductRow = () => {
+  // Reset form state when modal closes or purchaseId changes
+  const resetForm = useCallback(() => {
+    setDate(new Date())
+    setSupplier("")
+    setStatus("Credit")
+    setPurchaseStatus("Delivered")
+    setPaymentMethod("Cash")
+    setReceivedAmount(0)
     setProducts([
-      ...products,
       {
         id: crypto.randomUUID(),
         productId: null,
@@ -262,19 +115,177 @@ export default function EditPurchaseModal({
         wholesalePrice: 0,
       },
     ])
-  }
+    setTaxRate(0)
+    setDiscountAmount(0)
+    setFormAlert(null)
+    setActiveProductRowId(null)
+    setError(null)
+  }, [])
 
-  // Remove a product row
-  const removeProductRow = (id: string) => {
-    if (products.length > 1) {
-      setProducts(products.filter((product) => product.id !== id))
+  // Optimized purchase details fetching with duplicate request prevention
+  const fetchPurchaseDetails = useCallback(async () => {
+    if (!purchaseId || !isOpen || isLoadingRef.current || lastPurchaseIdRef.current === purchaseId) {
+      return
     }
-  }
 
-  // Update product row
-  const updateProductRow = (id: string, updates: Partial<ProductRow>) => {
-    setProducts(
-      products.map((product) => {
+    isLoadingRef.current = true
+    lastPurchaseIdRef.current = purchaseId
+    setIsLoading(true)
+    setError(null)
+
+    try {
+      // Fetch currency and purchase details in parallel
+      const [currencyResult, purchaseResult] = await Promise.allSettled([
+        getDeviceCurrency(userId),
+        getPurchaseDetails(purchaseId)
+      ])
+
+      // Handle currency result
+      if (currencyResult.status === 'fulfilled') {
+        setLocalCurrency(currencyResult.value)
+      } else {
+        console.error("Error fetching currency:", currencyResult.reason)
+        setLocalCurrency("QAR") // Fallback
+      }
+
+      // Handle purchase result
+      if (purchaseResult.status === 'rejected') {
+        throw purchaseResult.reason
+      }
+
+      const result = purchaseResult.value
+      if (!result.success) {
+        throw new Error(result.message || "Failed to load purchase details")
+      }
+
+      const { purchase, items } = result.data
+
+      // Set purchase data
+      setDate(new Date(purchase.purchase_date))
+      setSupplier(purchase.supplier || "")
+
+      // Map old status values to new ones
+      const statusMap: Record<string, string> = {
+        "Pending": "Credit",
+        "Received": "Paid",
+        "Partial": "Cancelled"
+      }
+      setStatus(statusMap[purchase.status] || purchase.status || "Credit")
+      
+      setPurchaseStatus(purchase.purchase_status || "Delivered")
+      setPaymentMethod(purchase.payment_method || "Cash")
+      setReceivedAmount(Number(purchase.received_amount) || 0)
+
+      // Calculate subtotal from items
+      const calculatedSubtotal = items.reduce((sum: number, item: any) => sum + item.quantity * item.price, 0)
+
+      // Estimate tax and discount
+      if (calculatedSubtotal > 0) {
+        const estimatedTaxAmount = Math.round((purchase.total_amount - calculatedSubtotal) * 100) / 100
+        if (estimatedTaxAmount > 0) {
+          setTaxRate(Math.round((estimatedTaxAmount / calculatedSubtotal) * 100 * 100) / 100)
+          setDiscountAmount(0)
+        } else {
+          setTaxRate(0)
+          setDiscountAmount(Math.abs(estimatedTaxAmount))
+        }
+      }
+
+      // Set product rows with optimized mapping
+      const productRows = items.map((item: any) => ({
+        id: crypto.randomUUID(),
+        productId: item.product_id,
+        productName: item.product_name,
+        quantity: item.quantity,
+        price: item.price,
+        total: item.quantity * item.price,
+        originalItemId: item.id,
+        wholesalePrice: item.wholesale_price || item.price,
+      }))
+
+      setProducts(
+        productRows.length > 0
+          ? productRows
+          : [
+              {
+                id: crypto.randomUUID(),
+                productId: null,
+                productName: "",
+                quantity: 1,
+                price: 0,
+                total: 0,
+                wholesalePrice: 0,
+              },
+            ]
+      )
+
+    } catch (error) {
+      console.error("Error fetching purchase details:", error)
+      const errorMessage = error instanceof Error ? error.message : "An error occurred while loading purchase details"
+      setError(errorMessage)
+      showNotification("error", errorMessage)
+    } finally {
+      setIsLoading(false)
+      isLoadingRef.current = false
+    }
+  }, [purchaseId, isOpen, userId, showNotification])
+
+  // Fetch purchase details when modal opens or purchaseId changes
+  useEffect(() => {
+    if (isOpen && purchaseId) {
+      fetchPurchaseDetails()
+    }
+  }, [isOpen, purchaseId, fetchPurchaseDetails])
+
+  // Reset form when modal closes
+  useEffect(() => {
+    if (!isOpen) {
+      resetForm()
+      setIsLoading(true)
+      lastPurchaseIdRef.current = null
+      isLoadingRef.current = false
+      isSubmittingRef.current = false
+    }
+  }, [isOpen, resetForm])
+
+  // Auto-adjust received amount based on status with debouncing
+  useEffect(() => {
+    if (status === "Paid") {
+      setReceivedAmount(totalAmount)
+    } else if (status === "Cancelled") {
+      setReceivedAmount(0)
+    }
+  }, [status, totalAmount])
+
+  // Optimized status change handler
+  const handleStatusChange = useCallback((newStatus: string) => {
+    setStatus(newStatus)
+    // Received amount will be auto-adjusted by the useEffect above
+  }, [])
+
+  // Optimized product row operations
+  const addProductRow = useCallback(() => {
+    setProducts(prev => [
+      ...prev,
+      {
+        id: crypto.randomUUID(),
+        productId: null,
+        productName: "",
+        quantity: 1,
+        price: 0,
+        total: 0,
+        wholesalePrice: 0,
+      },
+    ])
+  }, [])
+
+  const removeProductRow = useCallback((id: string) => {
+    setProducts(prev => prev.length > 1 ? prev.filter(product => product.id !== id) : prev)
+  }, [])
+
+  const updateProductRow = useCallback((id: string, updates: Partial<ProductRow>) => {
+    setProducts(prev =>
+      prev.map(product => {
         if (product.id === id) {
           const updatedProduct = { ...product, ...updates }
           if (updates.quantity !== undefined || updates.price !== undefined) {
@@ -283,12 +294,12 @@ export default function EditPurchaseModal({
           return updatedProduct
         }
         return product
-      }),
+      })
     )
-  }
+  }, [])
 
-  // Handle product selection
-  const handleProductSelect = (
+  // Optimized product selection handler
+  const handleProductSelect = useCallback((
     id: string,
     productId: number,
     productName: string,
@@ -296,28 +307,28 @@ export default function EditPurchaseModal({
     wholesalePrice?: number,
   ) => {
     const priceToUse = wholesalePrice || price
+    const currentQuantity = products.find(p => p.id === id)?.quantity || 1
 
     updateProductRow(id, {
       productId,
       productName,
       price: priceToUse,
       wholesalePrice,
-      total: (products.find((p) => p.id === id)?.quantity || 1) * priceToUse,
+      total: currentQuantity * priceToUse,
     })
-  }
+  }, [products, updateProductRow])
 
-  // Track which row is opening the add product modal
-  const handleAddNewFromRow = (rowId: string) => {
+  // Modal handlers
+  const handleAddNewFromRow = useCallback((rowId: string) => {
     setActiveProductRowId(rowId)
     setIsNewProductModalOpen(true)
-  }
+  }, [])
 
-  // Handle new product added
-  const handleNewProduct = (product: any) => {
+  const handleNewProduct = useCallback((product: any) => {
     dispatch(addProduct(product))
     showNotification("success", `Product "${product.name}" added successfully`)
 
-    const targetRowId = activeProductRowId || products.find((p) => !p.productId)?.id || products[products.length - 1].id
+    const targetRowId = activeProductRowId || products.find(p => !p.productId)?.id || products[products.length - 1].id
     const priceToUse = product.wholesale_price || product.price
 
     updateProductRow(targetRowId, {
@@ -325,49 +336,49 @@ export default function EditPurchaseModal({
       productName: product.name,
       price: priceToUse,
       wholesalePrice: product.wholesale_price,
-      total: (products.find((p) => p.id === targetRowId)?.quantity || 1) * priceToUse,
+      total: (products.find(p => p.id === targetRowId)?.quantity || 1) * priceToUse,
     })
 
     setIsNewProductModalOpen(false)
     setActiveProductRowId(null)
-  }
+  }, [dispatch, showNotification, activeProductRowId, products, updateProductRow])
 
-  // Handle form submission
-  const handleSubmit = async () => {
-    // Validate form
+  // Form validation
+  const validateForm = useCallback(() => {
     if (!supplier) {
-      setFormAlert({
-        type: "error",
-        message: "Please enter a supplier name",
-      })
-      return
+      return "Please enter a supplier name"
     }
 
-    if (!products.every((p) => p.productId && p.quantity > 0)) {
-      setFormAlert({
-        type: "error",
-        message: "Please select products and ensure quantities are greater than zero",
-      })
-      return
+    if (!products.every(p => p.productId && p.quantity > 0)) {
+      return "Please select products and ensure quantities are greater than zero"
     }
 
     if (status === "Paid" && !paymentMethod) {
-      setFormAlert({
-        type: "error",
-        message: "Please select a payment method",
-      })
-      return
+      return "Please select a payment method"
     }
 
     if (receivedAmount > totalAmount) {
-      setFormAlert({
-        type: "error",
-        message: "Received amount cannot be greater than total amount",
-      })
+      return "Received amount cannot be greater than total amount"
+    }
+
+    return null
+  }, [supplier, products, status, paymentMethod, receivedAmount, totalAmount])
+
+  // Optimized form submission with duplicate prevention
+  const handleSubmit = useCallback(async () => {
+    if (isSubmittingRef.current) {
+      return // Prevent duplicate submissions
+    }
+
+    const validationError = validateForm()
+    if (validationError) {
+      setFormAlert({ type: "error", message: validationError })
       return
     }
 
+    isSubmittingRef.current = true
     setIsSubmitting(true)
+    setFormAlert(null)
 
     try {
       let finalReceivedAmount = receivedAmount
@@ -389,7 +400,7 @@ export default function EditPurchaseModal({
       formData.append("device_id", deviceId.toString())
       formData.append("received_amount", finalReceivedAmount.toString())
 
-      const items = products.map((p) => ({
+      const items = products.map(p => ({
         id: p.originalItemId,
         product_id: p.productId,
         quantity: p.quantity,
@@ -402,30 +413,48 @@ export default function EditPurchaseModal({
 
       if (result.success) {
         showNotification("success", "Purchase updated successfully")
-        if (onPurchaseUpdated) {
-          onPurchaseUpdated()
-        }
+        onPurchaseUpdated?.()
         setTimeout(() => {
           onClose()
         }, 500)
       } else {
-        setFormAlert({
-          type: "error",
-          message: result.message || "Failed to update purchase",
-        })
-        showNotification("error", result.message || "Failed to update purchase")
+        const errorMessage = result.message || "Failed to update purchase"
+        setFormAlert({ type: "error", message: errorMessage })
+        showNotification("error", errorMessage)
       }
     } catch (error) {
       console.error("Update purchase error:", error)
-      setFormAlert({
-        type: "error",
-        message: "An unexpected error occurred",
-      })
-      showNotification("error", "An unexpected error occurred")
+      const errorMessage = "An unexpected error occurred"
+      setFormAlert({ type: "error", message: errorMessage })
+      showNotification("error", errorMessage)
     } finally {
       setIsSubmitting(false)
+      isSubmittingRef.current = false
     }
-  }
+  }, [
+    validateForm,
+    receivedAmount,
+    status,
+    totalAmount,
+    purchaseId,
+    supplier,
+    date,
+    purchaseStatus,
+    paymentMethod,
+    userId,
+    deviceId,
+    products,
+    showNotification,
+    onPurchaseUpdated,
+    onClose,
+  ])
+
+  // Memoized close handler
+  const handleClose = useCallback(() => {
+    if (!isSubmitting && !isLoading) {
+      onClose()
+    }
+  }, [isSubmitting, isLoading, onClose])
 
   return (
     <>
@@ -435,7 +464,13 @@ export default function EditPurchaseModal({
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 text-white p-4">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold">Edit Purchase</h2>
-              <Button variant="ghost" size="icon" onClick={onClose} className="text-white hover:bg-white/20 h-8 w-8">
+              <Button 
+                variant="ghost" 
+                size="icon" 
+                onClick={handleClose} 
+                className="text-white hover:bg-white/20 h-8 w-8"
+                disabled={isSubmitting || isLoading}
+              >
                 <X className="h-5 w-5" />
               </Button>
             </div>
@@ -598,7 +633,7 @@ export default function EditPurchaseModal({
                         <div className="flex justify-between font-bold text-blue-600 dark:text-blue-400 border-t border-gray-200 dark:border-gray-700 pt-2">
                           <span>Total:</span>
                           <span>
-                            {localCurrency} {Number(totalAmount).toFixed(2)}
+                            {localCurrency} {totalAmount.toFixed(2)}
                           </span>
                         </div>
                       </div>
