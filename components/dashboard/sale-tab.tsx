@@ -345,9 +345,18 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         if (result.success) {
           const serializedData = result.data.map((sale: any) => ({
             ...sale,
-            sale_date: typeof sale.sale_date === 'object' ? sale.sale_date.toISOString() : sale.sale_date,
-            created_at: typeof sale.created_at === 'object' ? sale.created_at.toISOString() : sale.created_at,
-            updated_at: typeof sale.updated_at === 'object' ? sale.updated_at.toISOString() : sale.updated_at,
+            sale_date:
+              sale.sale_date && typeof sale.sale_date === "object" && sale.sale_date !== null
+                ? sale.sale_date.toISOString()
+                : sale.sale_date || "",
+            created_at:
+              sale.created_at && typeof sale.created_at === "object" && sale.created_at !== null
+                ? sale.created_at.toISOString()
+                : sale.created_at || "",
+            updated_at:
+              sale.updated_at && typeof sale.updated_at === "object" && sale.updated_at !== null
+                ? sale.updated_at.toISOString()
+                : sale.updated_at || "",
           }))
           if (silent) {
             dispatch(updateSalesData(serializedData))
@@ -359,6 +368,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
           dispatch(setError(result.message || "Failed to load sales"))
         }
       } catch (error) {
+        console.error("Fetch sales error:", error)
         dispatch(setError("An error occurred while loading sales"))
       } finally {
         dispatch(setLoading(false))

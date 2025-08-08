@@ -33,6 +33,7 @@ import {
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useToast } from "@/components/ui/use-toast"
+import { selectDeviceId } from "@/store/slices/deviceSlice"
 
 interface StaffHeaderDropdownProps {
   userId: number 
@@ -44,7 +45,7 @@ interface StaffHeaderDropdownProps {
 
 export default function StaffHeaderDropdown({
   userId,
-  deviceId,
+  deviceId: deviceIdProp,
   showInSaleModal = false,
   selectedStaffId,
   onStaffChange,
@@ -54,6 +55,9 @@ export default function StaffHeaderDropdown({
   const activeStaff = useSelector(selectActiveStaff)
   const staffLoading = useSelector(selectStaffLoading)
   const { toast } = useToast()
+
+  // Get deviceId from Redux if not provided via props
+  const deviceId = deviceIdProp ?? useSelector(selectDeviceId)
 
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const [isNewModalOpen, setIsNewModalOpen] = useState(false)
