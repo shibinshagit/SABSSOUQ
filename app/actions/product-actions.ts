@@ -462,16 +462,19 @@ interface CreateProductParams {
 
 
 // Update the createProduct function to check for duplicates within user's products
-export async function createProduct(formData: any) {
-  const name = formData.name as string
-  const companyName = formData.company_name as string
-  const category = formData.category as string
-  const categoryId = formData.category_id ? Number(formData.category_id) : null
-  const price = Number.parseFloat(formData.price as string)
-  const wholesalePrice = Number.parseFloat(formData.wholesale_price as string) || 0
-  const stock = Number.parseInt(formData.stock as string)
-  const userId = formData.user_id || 1 // Default user ID
-  const barcode = (formData.barcode as string) || null
+export async function createProduct(formData: FormData) {
+  const name = formData.get("name") as string
+  const companyName = formData.get("company_name") as string
+  const category = formData.get("category") as string
+  const categoryId = formData.get("category_id") ? Number(formData.get("category_id")) : null
+  const price = Number.parseFloat(formData.get("price") as string)
+  const wholesalePrice = Number.parseFloat(formData.get("wholesale_price") as string) || 0
+  const msp = Number.parseFloat(formData.get("msp") as string) || 0
+  const stock = Number.parseInt(formData.get("stock") as string) || 0
+  const shelf = formData.get("shelf") as string
+  const userId = formData.get("user_id") ? Number.parseInt(formData.get("user_id") as string) : undefined
+  const barcode = formData.get("barcode") as string
+  const imageFile = formData.get("image") as File | null
 
   if (!name || isNaN(price)) {
     return { success: false, error: "Name and valid price are required" }

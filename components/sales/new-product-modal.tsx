@@ -339,7 +339,10 @@ useEffect(() => {
       if (selectedImage) {
         submitFormData.append("image", selectedImage)
       }
-
+console.log('FormData contents:')
+for (let pair of submitFormData.entries()) {
+  console.log(pair[0]+ ':', pair[1])
+}
       // Create product with FormData
       const result = await createProduct(submitFormData)
 

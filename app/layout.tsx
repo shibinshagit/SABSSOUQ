@@ -10,9 +10,9 @@ import { CustomThemeProvider } from "@/hooks/use-custom-theme"
 const inter = Inter({ subsets: ["latin"] })
 
 export const metadata: Metadata = {
-  title: "v0 App",
-  description: "Created with v0",
-  generator: "v0.dev",
+  title: "EZZY-MERCHANTS",
+  description: "YOUR ALL IN ONE BUSINESS SOLUTION",
+  generator: "shah",
 }
 
 export default function RootLayout({
