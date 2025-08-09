@@ -1,6 +1,5 @@
 "use client"
-
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -10,9 +9,8 @@ import { getProducts } from "@/app/actions/product-actions"
 import { getDeviceServices } from "@/app/actions/service-actions"
 import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
-import { useSelector, useDispatch } from "react-redux"
+import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
-import { setProducts, clearProducts, setLoading as setProductLoading } from "@/store/slices/productSlice"
 
 interface ProductSelectSimpleProps {
   id?: string
@@ -24,7 +22,33 @@ interface ProductSelectSimpleProps {
   refreshTrigger?: boolean
   onRefreshComplete?: () => void
   usePriceType?: "retail" | "wholesale"
-  allowServices?: boolean // New prop to control services availability
+  allowServices?: boolean
+  searchBufferSize?: number // New prop to control search buffer size
+}
+
+// Helper function to truncate names over 20 characters
+const truncateName = (name: string) => {
+  if (name.length > 20) {
+    return name.substring(0, 17) + "..."
+  }
+  return name
+}
+
+// Debounce hook for search
+const useDebounce = (value: string, delay: number) => {
+  const [debouncedValue, setDebouncedValue] = useState(value)
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      setDebouncedValue(value)
+    }, delay)
+
+    return () => {
+      clearTimeout(handler)
+    }
+  }, [value, delay])
+
+  return debouncedValue
 }
 
 export default function ProductSelectSimple({
@@ -37,69 +61,109 @@ export default function ProductSelectSimple({
   refreshTrigger = false,
   onRefreshComplete,
   usePriceType = "retail",
-  allowServices = true, // Default to true for backward compatibility
+  allowServices = true,
+  searchBufferSize = 50, // Default buffer size
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
-  const dispatch = useDispatch()
   const [open, setOpen] = useState(false)
   const [services, setServices] = useState<any[]>([])
+  const [products, setProducts] = useState<any[]>([])
   const [loading, setLoading] = useState(false)
   const [localSearchTerm, setLocalSearchTerm] = useState("")
   const [isServiceMode, setIsServiceMode] = useState(false)
-  const [isReloading, setIsReloading] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<any>(null)
+  const [hasSearched, setHasSearched] = useState(false)
 
-  // Get products from Redux store
-  const reduxProducts = useSelector((state: any) => state.product.products)
-  const reduxLoading = useSelector((state: any) => state.product.loading)
+  // Debounce search term to avoid excessive API calls
+  const debouncedSearchTerm = useDebounce(localSearchTerm, 300)
 
-  // Fetch items when component mounts or userId changes
+  // Fetch services when component mounts (if allowed)
   useEffect(() => {
-    if (reduxProducts.length === 0 && !reduxLoading) {
-      fetchProducts()
-    }
     if (allowServices && services.length === 0) {
       fetchServices()
     }
-  }, [userId, reduxProducts.length, reduxLoading, allowServices])
+  }, [allowServices])
 
-  // Refresh items when refreshTrigger changes
+  // Search products when debounced search term changes
+  useEffect(() => {
+    if (debouncedSearchTerm.trim() !== "" && !isServiceMode && open) {
+      searchProducts(debouncedSearchTerm)
+      setHasSearched(true)
+    } else if (debouncedSearchTerm.trim() === "" && !isServiceMode) {
+      setProducts([])
+      setHasSearched(false)
+    }
+  }, [debouncedSearchTerm, isServiceMode, open, userId])
+
+  // Handle refresh trigger
   useEffect(() => {
     if (refreshTrigger) {
-      fetchProducts().then(() => {
-        if (allowServices) {
-          fetchServices()
-        }
-        if (onRefreshComplete) {
-          onRefreshComplete()
-        }
-      })
+      if (allowServices) {
+        fetchServices()
+      }
+      // Clear current products and force re-search if there's a search term
+      if (debouncedSearchTerm.trim() !== "" && !isServiceMode) {
+        searchProducts(debouncedSearchTerm)
+      }
+      if (onRefreshComplete) {
+        onRefreshComplete()
+      }
     }
-  }, [refreshTrigger, onRefreshComplete, allowServices])
+  }, [refreshTrigger, onRefreshComplete, allowServices, debouncedSearchTerm, isServiceMode])
 
-  const fetchProducts = async () => {
-    if (loading || reduxLoading) return
+  // Find selected item when value or products change
+  useEffect(() => {
+    if (value) {
+      if (isServiceMode) {
+        const service = services.find(s => s.id === value)
+        setSelectedProduct(service || null)
+      } else {
+        const product = products.find(p => p.id === value)
+        if (product) {
+          setSelectedProduct(product)
+        } else if (!hasSearched) {
+          // If we haven't searched yet and have a value, fetch that specific product
+          fetchSelectedProduct(value)
+        }
+      }
+    } else {
+      setSelectedProduct(null)
+    }
+  }, [value, products, services, isServiceMode, hasSearched])
 
+  const searchProducts = async (searchTerm: string) => {
+    if (loading) return
     try {
       setLoading(true)
-      dispatch(setProductLoading(true))
-      const result = await getProducts(userId)
+      const result = await getProducts(userId, searchBufferSize, searchTerm)
       if (result.success) {
-        // Update Redux store with products
-        dispatch(setProducts(result.data))
+        setProducts(result.data)
       } else {
-        console.error("Failed to load products:", result.message)
+        console.error("Failed to search products:", result.message)
+        setProducts([])
       }
     } catch (error) {
-      console.error("Error fetching products:", error)
+      console.error("Error searching products:", error)
+      setProducts([])
     } finally {
       setLoading(false)
-      dispatch(setProductLoading(false))
+    }
+  }
+
+  const fetchSelectedProduct = async (productId: number) => {
+    try {
+      // Search by ID to get the selected product details
+      const result = await getProducts(userId, 1, productId.toString())
+      if (result.success && result.data.length > 0) {
+        setSelectedProduct(result.data[0])
+      }
+    } catch (error) {
+      console.error("Error fetching selected product:", error)
     }
   }
 
   const fetchServices = async () => {
     if (!deviceId || !allowServices) return
-
     try {
       const result = await getDeviceServices(deviceId)
       if (result.success) {
@@ -112,41 +176,17 @@ export default function ProductSelectSimple({
     }
   }
 
-  // Handle reload - clear Redux and refetch
-  const handleReload = async () => {
-    try {
-      setIsReloading(true)
-      // Clear Redux products
-      dispatch(clearProducts())
-      // Clear local search
-      setLocalSearchTerm("")
-      // Refetch products
-      await fetchProducts()
-      if (allowServices) {
-        await fetchServices()
-      }
-    } catch (error) {
-      console.error("Error reloading products:", error)
-    } finally {
-      setIsReloading(false)
-    }
-  }
-
   // Get items based on mode
-  const items = isServiceMode ? services : reduxProducts
+  const items = isServiceMode ? services : products
 
-  // Find the selected item
-  const selectedItem = items.find((item) => item.id === value)
-
-  // Filter items based on local search term - search works on Redux data
-  const filteredItems =
-    localSearchTerm.trim() === ""
-      ? items
-      : items.filter(
-          (item) =>
-            item.name.toLowerCase().includes(localSearchTerm.toLowerCase()) ||
-            (item.barcode && item.barcode.toLowerCase().includes(localSearchTerm.toLowerCase())),
-        )
+  // Filter services based on local search term (only for services, products are already filtered by API)
+  const filteredItems = isServiceMode && localSearchTerm.trim() !== ""
+    ? services.filter(
+        (item) =>
+          item.name.toLowerCase().includes(localSearchTerm.toLowerCase()) ||
+          (item.category && item.category.toLowerCase().includes(localSearchTerm.toLowerCase()))
+      )
+    : items
 
   // Handle item selection
   const handleItemSelect = (
@@ -168,13 +208,17 @@ export default function ProductSelectSimple({
     setLocalSearchTerm("")
   }
 
-  // Handle dialog opening - use Redux data
-  const handleDialogOpen = async () => {
+  // Handle dialog opening
+  const handleDialogOpen = () => {
     setOpen(true)
-    // If no products in Redux, fetch them
-    if (reduxProducts.length === 0) {
-      await fetchProducts()
-    }
+  }
+
+  // Handle dialog closing
+  const handleDialogClose = () => {
+    setOpen(false)
+    setLocalSearchTerm("")
+    setProducts([])
+    setHasSearched(false)
   }
 
   // Handle add new based on current mode
@@ -185,6 +229,14 @@ export default function ProductSelectSimple({
     } else {
       onAddNew()
     }
+  }
+
+  // Handle mode switch
+  const handleModeSwitch = (checked: boolean) => {
+    setIsServiceMode(checked)
+    setLocalSearchTerm("")
+    setProducts([])
+    setHasSearched(false)
   }
 
   return (
@@ -199,14 +251,14 @@ export default function ProductSelectSimple({
         onClick={handleDialogOpen}
       >
         <div className="flex items-center">
-          {selectedItem ? (
+          {selectedProduct ? (
             <>
-              {isServiceMode || (selectedItem && "category" in selectedItem) ? (
+              {isServiceMode || (selectedProduct && "category" in selectedProduct) ? (
                 <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
               ) : (
                 <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400" />
               )}
-              <span className="truncate">{selectedItem.name}</span>
+              <span className="truncate">{truncateName(selectedProduct.name)}</span>
             </>
           ) : (
             <>
@@ -222,22 +274,12 @@ export default function ProductSelectSimple({
         <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
       </Button>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={handleDialogClose}>
         <DialogContent className="sm:max-w-md p-0 gap-0 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between border-b border-gray-200 dark:border-gray-700 p-4 bg-gray-50 dark:bg-gray-700">
             <h2 className="text-lg font-semibold text-gray-900 dark:text-gray-100">
               Select {isServiceMode ? "Service" : "Product"}
             </h2>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleReload}
-              disabled={isReloading}
-              className="flex items-center gap-2 text-blue-600 hover:text-blue-700 hover:bg-blue-50 dark:text-blue-400 dark:hover:text-blue-300 dark:hover:bg-blue-900/20"
-            >
-              <RefreshCw className={`h-4 w-4 ${isReloading ? "animate-spin" : ""}`} />
-              Reload
-            </Button>
           </div>
 
           <div className="p-4 border-b border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800">
@@ -270,10 +312,7 @@ export default function ProductSelectSimple({
                   <Switch
                     id="service-mode"
                     checked={isServiceMode}
-                    onCheckedChange={(checked) => {
-                      setIsServiceMode(checked)
-                      setLocalSearchTerm("")
-                    }}
+                    onCheckedChange={handleModeSwitch}
                   />
                   <Label
                     htmlFor="service-mode"
@@ -297,11 +336,18 @@ export default function ProductSelectSimple({
           </div>
 
           <div className="max-h-[300px] overflow-y-auto bg-white dark:bg-gray-800">
-            {loading || reduxLoading || isReloading ? (
+            {loading ? (
               <div className="py-8 text-center">
                 <Loader2 className="h-6 w-6 animate-spin mx-auto text-blue-600" />
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-2">
-                  {isReloading ? "Reloading" : "Loading"} {isServiceMode ? "services" : "products"}...
+                  Searching {isServiceMode ? "services" : "products"}...
+                </p>
+              </div>
+            ) : !hasSearched && !isServiceMode ? (
+              <div className="p-4 text-center">
+                <Search className="h-8 w-8 mx-auto text-gray-400 mb-2" />
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Start typing to search products...
                 </p>
               </div>
             ) : filteredItems.length === 0 ? (
@@ -313,7 +359,7 @@ export default function ProductSelectSimple({
             ) : (
               <div className="p-1">
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2">
-                  {isServiceMode ? "Services" : "Products"} ({filteredItems.length})
+                  {isServiceMode ? "Services" : "Products"} ({filteredItems.length}{!isServiceMode && filteredItems.length === searchBufferSize ? "+" : ""})
                 </div>
                 <div>
                   {filteredItems.map((item) => (
@@ -339,8 +385,11 @@ export default function ProductSelectSimple({
                           <Package className="h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                         )}
                         <div className="flex flex-col flex-1 min-w-0">
-                          <span className="text-gray-900 dark:text-gray-100 truncate">{item.name}</span>
+                          <span className="text-gray-900 dark:text-gray-100 truncate" title={item.name}>
+                            {item.name}
+                          </span>
                           <span className="text-xs text-gray-500 dark:text-gray-400">
+                            {!isServiceMode && item.wholesale_price > 0 && ` • Company: ${item.company_name} `} 
                             Price: {item.price}
                             {!isServiceMode && item.wholesale_price > 0 && ` • Wholesale: ${item.wholesale_price}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}

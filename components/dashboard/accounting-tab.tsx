@@ -206,7 +206,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false)
   const [manualAmount, setManualAmount] = useState("")
   const [manualType, setManualType] = useState<"debit" | "credit">("debit")
-  const [manualDescription, setManualDescription] = useState("")
+  const [manualDescription, setManualDescription] = useState("No Description")
   const [manualCategory, setManualCategory] = useState("")
   const [manualPaymentMethod, setManualPaymentMethod] = useState("Cash")
   const [manualDate, setManualDate] = useState<Date>(new Date())
@@ -476,7 +476,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const handleAddManualTransaction = async () => {
-    if (!manualAmount || !manualDescription || !manualCategory) {
+    if (!manualAmount || !manualCategory) {
       toast.error("Please fill in all required fields")
       return
     }
@@ -1542,7 +1542,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="manual-description">Description</Label>
+              <Label htmlFor="manual-description">Description (optional)</Label>
               <Textarea
                 id="manual-description"
                 value={manualDescription}
