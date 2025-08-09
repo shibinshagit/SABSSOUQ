@@ -439,7 +439,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
                 {/* Product Image Upload */}
-                <div className="grid gap-2">
+                {/* <div className="grid gap-2">
                   <Label className="text-gray-700 dark:text-gray-300">Product Image</Label>
                   <div className="flex flex-col gap-2">
                     {imagePreview || currentImageUrl ? (
@@ -482,7 +482,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                       className="hidden"
                     />
                   </div>
-                </div>
+                </div> */}
 
                 <div className="grid gap-2">
                   <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
@@ -584,7 +584,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                     />
                   </div>
 
-                  <div className="grid gap-2">
+                  {/* <div className="grid gap-2">
                     <Label htmlFor="msp" className="text-gray-700 dark:text-gray-300">
                       MSP - Minimum Selling Price ({currency})
                     </Label>
@@ -599,7 +599,7 @@ export default function EditProductModal({ isOpen, onClose, onSuccess, product, 
                       placeholder="0.00"
                       className="bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder:text-gray-500 dark:placeholder:text-gray-400"
                     />
-                  </div>
+                  </div> */}
 
                   <div className="grid gap-2">
                     <Label htmlFor="price" className="text-gray-700 dark:text-gray-300">

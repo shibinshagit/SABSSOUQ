@@ -199,7 +199,7 @@ export default function ViewProductModal({
 
                     <div className="space-y-2">
                       <h3 className="text-sm font-medium text-gray-500 dark:text-gray-400">Company Name</h3>
-                      <p className="text-gray-900 dark:text-gray-100">{product.company_name || "Al Aneeq"}</p>
+                      <p className="text-gray-900 dark:text-gray-100">{product.company_name || "N/A"}</p>
                     </div>
 
                     <div className="space-y-2">

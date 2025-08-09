@@ -584,7 +584,7 @@ export default function NewPurchaseModal({
                         min="1"
                         value={product.quantity}
                         onChange={(e) =>
-                          updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 0 })
+                          updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
                         }
                         className="text-center h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                       />
