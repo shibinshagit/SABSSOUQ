@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -254,6 +254,8 @@ export default function NewPurchaseModal({
 
   // Handle form submission
   const handleSubmit = async () => {
+    setFormAlert(null) // Clear any previous alerts
+    
     // Validate form
     if (!supplier) {
       setFormAlert({
@@ -353,11 +355,12 @@ export default function NewPurchaseModal({
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-bold">Add New Purchase</h2>
               <Button
-              
+                variant="ghost"
+                size="icon"
                 onClick={onClose}
+                className="text-white hover:bg-white/20"
               >
-                            <X className="h-5 w-5" />
-
+                <X className="h-5 w-5" />
               </Button>
             </div>
           </div>
@@ -581,7 +584,7 @@ export default function NewPurchaseModal({
                         min="1"
                         value={product.quantity}
                         onChange={(e) =>
-                          updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 0 })
+                          updateProductRow(product.id, { quantity: Number.parseInt(e.target.value) || 1 })
                         }
                         className="text-center h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                       />
@@ -634,3 +637,4 @@ export default function NewPurchaseModal({
     </>
   )
 }
+

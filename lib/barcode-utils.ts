@@ -262,7 +262,6 @@ export function printBarcodeSticker(product: any, currency = "AED") {
         </div>
         <div class="price-container">
           <div class="price-english">${currency}: ${price}</div>
-          <div class="price-arabic">${arabicPrice} :${currency === "AED" ? "د.إ" : currency}</div>
         </div>
       </div>
 
@@ -349,7 +348,6 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           </div>
           <div class="price-container">
             <div class="price-english">${currency}: ${price}</div>
-            <div class="price-arabic">${arabicPrice} :${currency === "AED" ? "د.إ" : currency}</div>
           </div>
         </div>
       `

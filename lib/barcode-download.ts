@@ -57,10 +57,7 @@ export function downloadBarcode(product: any, format: "png" | "pdf" = "png") {
           format: [2, 3],
         })
 
-        // Add item code
-        doc.setFontSize(6)
-        doc.text(`Code: ${itemCode}`, 0.1, 0.3)
-
+        
         // Add product name
         doc.setFontSize(6)
         doc.text(product.name, 1, 0.6, { align: "center" })

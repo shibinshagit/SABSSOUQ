@@ -1,6 +1,8 @@
 "use client"
 
 import type React from "react"
+import { useSelector } from "react-redux"
+import { selectDeviceId } from "@/store/slices/deviceSlice"
 
 import { useState } from "react"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,17 +18,20 @@ interface NewStaffModalProps {
   isOpen: boolean
   onClose: () => void
   onStaffAdded: (newStaff: any) => void
-  userId: number | null | undefined
-  deviceId: number | null | undefined
+  userId: number 
+  deviceId: number 
 }
 
 export default function NewStaffModal({
   isOpen,
   onClose,
   onStaffAdded,
-  userId = null,
-  deviceId = null,
+  userId,
+  deviceId: deviceIdProp,
 }: NewStaffModalProps) {
+  // Get deviceId from Redux if not provided via props
+  const deviceId = deviceIdProp ?? useSelector(selectDeviceId)
+
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
