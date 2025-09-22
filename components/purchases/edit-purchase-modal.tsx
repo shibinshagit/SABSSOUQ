@@ -430,7 +430,7 @@ export default function EditPurchaseModal({
   return (
     <>
       <Dialog open={isOpen} onOpenChange={() => {}}>
-        <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden p-0 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+        <DialogContent className="max-w-5xl max-h-[95vh] overflow-hidden p-0 bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700 [&>button]:hidden">
           {/* Header */}
           <div className="bg-gradient-to-r from-blue-600 to-blue-700 dark:from-blue-700 dark:to-blue-800 text-white p-4">
             <div className="flex items-center justify-between">

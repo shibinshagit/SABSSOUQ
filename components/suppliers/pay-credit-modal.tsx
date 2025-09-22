@@ -143,10 +143,10 @@ export default function PayCreditModal({
   ].filter((amount, index, arr) => arr.indexOf(amount) === index && amount > 0)
 
   return (
-    <Dialog open={isOpen} onOpenChange={(open) => !open && handleClose()}>
-      <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex flex-col">
+    <Dialog open={isOpen} onOpenChange={() => {}}>
+      <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex flex-col [&>button]:hidden">
         {paymentResult ? (
-          // Success View - Keep as is (no changes needed)
+          // Success View
           <div className="flex flex-col h-full max-h-[90vh]">
             {/* Success Header */}
             <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 relative overflow-hidden">
@@ -162,14 +162,6 @@ export default function PayCreditModal({
                       <p className="text-green-100">Transaction completed successfully</p>
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={handleClose}
-                    className="text-white hover:bg-white/20 rounded-full p-2"
-                  >
-                    <X className="h-5 w-5" />
-                  </Button>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
@@ -327,9 +319,9 @@ export default function PayCreditModal({
             </div>
           </div>
         ) : (
-          // Payment Form - FIXED: Reduced height and made more compact
+          // Payment Form
           <div className="flex flex-col h-full">
-            {/* Header - Reduced padding */}
+            {/* Header */}
             <div className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white p-4 relative overflow-hidden">
               <div className="absolute inset-0 bg-white/10 backdrop-blur-sm"></div>
               <div className="relative z-10">
@@ -347,6 +339,7 @@ export default function PayCreditModal({
                     variant="ghost"
                     size="sm"
                     onClick={handleClose}
+                    disabled={isLoading}
                     className="text-white hover:bg-white/20 rounded-full p-2"
                   >
                     <X className="h-4 w-4" />
@@ -355,9 +348,9 @@ export default function PayCreditModal({
               </div>
             </div>
 
-            {/* Form Content - Reduced spacing */}
+            {/* Form Content */}
             <div className="flex-1 overflow-y-auto p-4 space-y-4 max-h-[70vh]">
-              {/* Error Display - Moved to top */}
+              {/* Error Display */}
               {error && (
                 <Card className="border-red-200 bg-red-50 dark:border-red-800 dark:bg-red-900/20">
                   <CardContent className="p-3">
@@ -370,7 +363,7 @@ export default function PayCreditModal({
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {/* Supplier Info Card - More compact */}
+                {/* Supplier Info Card */}
                 <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-between">
@@ -391,7 +384,7 @@ export default function PayCreditModal({
                   </CardContent>
                 </Card>
 
-                {/* Payment Form Card - More compact */}
+                {/* Payment Form Card */}
                 <Card className="border-0 shadow-lg bg-white dark:bg-gray-800">
                   <CardContent className="p-4 space-y-4">
                     <div className="flex items-center space-x-2 mb-3">
@@ -455,7 +448,7 @@ export default function PayCreditModal({
                       </div>
                     </div>
 
-                    {/* Quick Amount Buttons - Smaller */}
+                    {/* Quick Amount Buttons */}
                     <div className="space-y-2">
                       <Label className="text-sm font-medium text-gray-700 dark:text-gray-300">Quick Amounts</Label>
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
@@ -473,7 +466,7 @@ export default function PayCreditModal({
                       </div>
                     </div>
 
-                    {/* Notes - Smaller */}
+                    {/* Notes */}
                     <div className="space-y-2">
                       <Label
                         htmlFor="notes"
@@ -496,7 +489,7 @@ export default function PayCreditModal({
               </form>
             </div>
 
-            {/* Footer - Reduced padding */}
+            {/* Footer */}
             <div className="border-t bg-white dark:bg-gray-800 p-4">
               <div className="flex flex-col sm:flex-row justify-between items-center space-y-2 sm:space-y-0 sm:space-x-3">
                 <div className="text-xs text-gray-500 dark:text-gray-400">
