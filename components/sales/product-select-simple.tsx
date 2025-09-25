@@ -113,7 +113,7 @@ export default function ProductSelectSimple({
 
   // Find selected item when value or products change
   useEffect(() => {
-    if (value) {
+    if (value && !selectedProduct) {
       if (isServiceMode) {
         const service = services.find(s => s.id === value)
         setSelectedProduct(service || null)
@@ -131,24 +131,63 @@ export default function ProductSelectSimple({
     }
   }, [value, products, services, isServiceMode, hasSearched])
 
-  const searchProducts = async (searchTerm: string) => {
-    if (loading) return
-    try {
-      setLoading(true)
-      const result = await getProducts(userId, searchBufferSize, searchTerm)
-      if (result.success) {
-        setProducts(result.data)
-      } else {
-        console.error("Failed to search products:", result.message)
-        setProducts([])
+  // Simplified search function - NO addSimpleSpaces needed!
+const searchProducts = async (searchTerm: string) => {
+  if (loading) return;
+  try {
+    setLoading(true);
+    
+    // Convert search term to lowercase for comparison
+    const lowerSearchTerm = searchTerm.toLowerCase();
+    
+    // Try original search first (backend API call)
+    let result = await getProducts(userId, searchBufferSize, searchTerm);
+    
+    // If no results from backend, get broader set and filter client-side
+    if (!result.success || result.data.length === 0) {
+      // Get more products for client-side filtering
+      const broadResult = await getProducts(userId, searchBufferSize * 2, '');
+      
+      if (broadResult.success && broadResult.data.length > 0) {
+        // Filter products client-side with lowercase comparison
+        const filteredProducts = broadResult.data.filter(product => {
+          const productName = product.name.toLowerCase().replace(/\s+/g, '');
+          const companyName = (product.company_name || '').toLowerCase().replace(/\s+/g, '');
+          const searchNoSpaces = lowerSearchTerm.replace(/\s+/g, '');
+          
+          return (
+            productName.includes(searchNoSpaces) ||
+            companyName.includes(searchNoSpaces) ||
+            (product.barcode && product.barcode.toLowerCase().includes(lowerSearchTerm)) ||
+            // Also try with original spacing preserved
+            product.name.toLowerCase().includes(lowerSearchTerm) ||
+            (product.company_name && product.company_name.toLowerCase().includes(lowerSearchTerm))
+          );
+        });
+        
+        result = {
+          success: true,
+          data: filteredProducts.slice(0, searchBufferSize)
+        };
       }
-    } catch (error) {
-      console.error("Error searching products:", error)
-      setProducts([])
-    } finally {
-      setLoading(false)
     }
+    
+    if (result.success) {
+      setProducts(result.data);
+    } else {
+      console.error("Failed to search products:", result.message);
+      setProducts([]);
+    }
+  } catch (error) {
+    console.error("Error searching products:", error);
+    setProducts([]);
+  } finally {
+    setLoading(false);
   }
+};
+
+// NO addSimpleSpaces function needed!
+
 
   const fetchSelectedProduct = async (productId: number) => {
     try {
@@ -190,23 +229,32 @@ export default function ProductSelectSimple({
 
   // Handle item selection
   const handleItemSelect = (
-    itemId: number,
-    itemName: string,
-    price: number,
-    wholesalePrice?: number,
-    stock?: number,
-  ) => {
-    if (isServiceMode) {
-      // For services, set stock to 999 (unlimited)
-      onChange(itemId, itemName, price, 0, 999)
-    } else {
-      // For products, use actual stock and price based on type
-      const finalPrice = usePriceType === "wholesale" && wholesalePrice ? wholesalePrice : price
-      onChange(itemId, itemName, finalPrice, wholesalePrice, stock)
-    }
-    setOpen(false)
-    setLocalSearchTerm("")
+  itemId: number,
+  itemName: string,
+  price: number,
+  wholesalePrice?: number,
+  stock?: number,
+) => {
+  // ✅ lock correct name immediately
+  setSelectedProduct({
+    id: itemId,
+    name: itemName,
+    price,
+    wholesale_price: wholesalePrice,
+    stock,
+  })
+
+  if (isServiceMode) {
+    onChange(itemId, itemName, price, 0, 999)
+  } else {
+    const finalPrice =
+      usePriceType === "wholesale" && wholesalePrice ? wholesalePrice : price
+    onChange(itemId, itemName, finalPrice, wholesalePrice, stock)
   }
+
+  setOpen(false)
+  setLocalSearchTerm("")
+}
 
   // Handle dialog opening
   const handleDialogOpen = () => {

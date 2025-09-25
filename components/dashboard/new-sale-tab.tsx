@@ -1021,3 +1021,4 @@ export default function NewSaleTab({ userId, mockMode = false }: NewSaleTabProps
     </div>
   )
 }
+
