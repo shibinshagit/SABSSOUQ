@@ -176,8 +176,8 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
     let products
 
     if (searchTerm && searchTerm.trim() !== "") {
-      // Search with optional limit
-      const searchPattern = `%${searchTerm.toLowerCase()}%`
+      // Normalize search term: lowercase + remove spaces
+      const searchPattern = `%${searchTerm.toLowerCase().replace(/\s+/g, "")}%`
 
       if (limit) {
         if (userId) {
@@ -189,11 +189,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
             LEFT JOIN product_categories c ON p.category_id = c.id
             WHERE p.created_by = ${userId}
             AND (
-              LOWER(p.name) LIKE ${searchPattern} OR
-              LOWER(p.category) LIKE ${searchPattern} OR
-              LOWER(p.company_name) LIKE ${searchPattern} OR
-              LOWER(p.shelf) LIKE ${searchPattern} OR
-              p.barcode LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
               p.id::text LIKE ${searchPattern}
             )
             ORDER BY p.created_at DESC
@@ -207,11 +207,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
             WHERE (
-              LOWER(p.name) LIKE ${searchPattern} OR
-              LOWER(p.category) LIKE ${searchPattern} OR
-              LOWER(p.company_name) LIKE ${searchPattern} OR
-              LOWER(p.shelf) LIKE ${searchPattern} OR
-              p.barcode LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
               p.id::text LIKE ${searchPattern}
             )
             ORDER BY p.created_at DESC
@@ -229,11 +229,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
             LEFT JOIN product_categories c ON p.category_id = c.id
             WHERE p.created_by = ${userId}
             AND (
-              LOWER(p.name) LIKE ${searchPattern} OR
-              LOWER(p.category) LIKE ${searchPattern} OR
-              LOWER(p.company_name) LIKE ${searchPattern} OR
-              LOWER(p.shelf) LIKE ${searchPattern} OR
-              p.barcode LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
               p.id::text LIKE ${searchPattern}
             )
             ORDER BY p.created_at DESC
@@ -246,11 +246,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
             FROM products p
             LEFT JOIN product_categories c ON p.category_id = c.id
             WHERE (
-              LOWER(p.name) LIKE ${searchPattern} OR
-              LOWER(p.category) LIKE ${searchPattern} OR
-              LOWER(p.company_name) LIKE ${searchPattern} OR
-              LOWER(p.shelf) LIKE ${searchPattern} OR
-              p.barcode LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
               p.id::text LIKE ${searchPattern}
             )
             ORDER BY p.created_at DESC
@@ -258,7 +258,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
         }
       }
     } else {
-      // Regular fetch with optional limit
+      // Regular fetch with optional limit (unchanged)
       if (limit) {
         if (userId) {
           products = await sql`
@@ -283,7 +283,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
           `
         }
       } else {
-        // Fetch all
+        // Fetch all (unchanged)
         if (userId) {
           products = await sql`
             SELECT 
@@ -307,7 +307,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
       }
     }
 
-    // Map the results to include category from either category_id or legacy category field
+    // Map results
     const mappedProducts = products.map((product) => ({
       ...product,
       category: product.category_name || product.category || "",
