@@ -1,9 +1,9 @@
 "use client"
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect } from "react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Check, ChevronsUpDown, Plus, Loader2, Search, X, Package, Wrench, RefreshCw } from "lucide-react"
+import { Check, ChevronsUpDown, Plus, Loader2, Search, X, Package, Wrench } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { getProducts } from "@/app/actions/product-actions"
 import { getDeviceServices } from "@/app/actions/service-actions"
@@ -23,33 +23,30 @@ interface ProductSelectSimpleProps {
   onRefreshComplete?: () => void
   usePriceType?: "retail" | "wholesale"
   allowServices?: boolean
-  searchBufferSize?: number // New prop to control search buffer size
+  searchBufferSize?: number
 }
 
-// Helper function to truncate names over 20 characters
+// Helper: truncate names
 const truncateName = (name: string) => {
-  if (name.length > 20) {
-    return name.substring(0, 17) + "..."
-  }
+  if (name.length > 20) return name.substring(0, 17) + "..."
   return name
 }
 
-// Debounce hook for search
+// Debounce hook
 const useDebounce = (value: string, delay: number) => {
   const [debouncedValue, setDebouncedValue] = useState(value)
 
   useEffect(() => {
-    const handler = setTimeout(() => {
-      setDebouncedValue(value)
-    }, delay)
-
-    return () => {
-      clearTimeout(handler)
-    }
+    const handler = setTimeout(() => setDebouncedValue(value), delay)
+    return () => clearTimeout(handler)
   }, [value, delay])
 
   return debouncedValue
 }
+
+// Helper: normalize string for search
+const normalize = (str: string) =>
+  (str || "").toLowerCase().replace(/\s+/g, "").trim()
 
 export default function ProductSelectSimple({
   id,
@@ -62,7 +59,7 @@ export default function ProductSelectSimple({
   onRefreshComplete,
   usePriceType = "retail",
   allowServices = true,
-  searchBufferSize = 50, // Default buffer size
+  searchBufferSize = 50,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
   const [open, setOpen] = useState(false)
@@ -74,17 +71,16 @@ export default function ProductSelectSimple({
   const [selectedProduct, setSelectedProduct] = useState<any>(null)
   const [hasSearched, setHasSearched] = useState(false)
 
-  // Debounce search term to avoid excessive API calls
   const debouncedSearchTerm = useDebounce(localSearchTerm, 300)
 
-  // Fetch services when component mounts (if allowed)
+  // Fetch services on mount
   useEffect(() => {
     if (allowServices && services.length === 0) {
       fetchServices()
     }
   }, [allowServices])
 
-  // Search products when debounced search term changes
+  // Search products
   useEffect(() => {
     if (debouncedSearchTerm.trim() !== "" && !isServiceMode && open) {
       searchProducts(debouncedSearchTerm)
@@ -95,34 +91,28 @@ export default function ProductSelectSimple({
     }
   }, [debouncedSearchTerm, isServiceMode, open, userId])
 
-  // Handle refresh trigger
+  // Refresh trigger
   useEffect(() => {
     if (refreshTrigger) {
-      if (allowServices) {
-        fetchServices()
-      }
-      // Clear current products and force re-search if there's a search term
+      if (allowServices) fetchServices()
       if (debouncedSearchTerm.trim() !== "" && !isServiceMode) {
         searchProducts(debouncedSearchTerm)
       }
-      if (onRefreshComplete) {
-        onRefreshComplete()
-      }
+      if (onRefreshComplete) onRefreshComplete()
     }
   }, [refreshTrigger, onRefreshComplete, allowServices, debouncedSearchTerm, isServiceMode])
 
-  // Find selected item when value or products change
+  // Handle selected product
   useEffect(() => {
     if (value && !selectedProduct) {
       if (isServiceMode) {
-        const service = services.find(s => s.id === value)
+        const service = services.find((s) => s.id === value)
         setSelectedProduct(service || null)
       } else {
-        const product = products.find(p => p.id === value)
+        const product = products.find((p) => p.id === value)
         if (product) {
           setSelectedProduct(product)
         } else if (!hasSearched) {
-          // If we haven't searched yet and have a value, fetch that specific product
           fetchSelectedProduct(value)
         }
       }
@@ -131,67 +121,53 @@ export default function ProductSelectSimple({
     }
   }, [value, products, services, isServiceMode, hasSearched])
 
-  // Simplified search function - NO addSimpleSpaces needed!
-const searchProducts = async (searchTerm: string) => {
-  if (loading) return;
-  try {
-    setLoading(true);
-    
-    // Convert search term to lowercase for comparison
-    const lowerSearchTerm = searchTerm.toLowerCase();
-    
-    // Try original search first (backend API call)
-    let result = await getProducts(userId, searchBufferSize, searchTerm);
-    
-    // If no results from backend, get broader set and filter client-side
-    if (!result.success || result.data.length === 0) {
-      // Get more products for client-side filtering
-      const broadResult = await getProducts(userId, searchBufferSize * 2, '');
-      
-      if (broadResult.success && broadResult.data.length > 0) {
-        // Filter products client-side with lowercase comparison
-        const filteredProducts = broadResult.data.filter(product => {
-          const productName = product.name.toLowerCase().replace(/\s+/g, '');
-          const companyName = (product.company_name || '').toLowerCase().replace(/\s+/g, '');
-          const searchNoSpaces = lowerSearchTerm.replace(/\s+/g, '');
-          
-          return (
-            productName.includes(searchNoSpaces) ||
-            companyName.includes(searchNoSpaces) ||
-            (product.barcode && product.barcode.toLowerCase().includes(lowerSearchTerm)) ||
-            // Also try with original spacing preserved
-            product.name.toLowerCase().includes(lowerSearchTerm) ||
-            (product.company_name && product.company_name.toLowerCase().includes(lowerSearchTerm))
-          );
-        });
-        
-        result = {
-          success: true,
-          data: filteredProducts.slice(0, searchBufferSize)
-        };
+  // Search products with normalization
+  const searchProducts = async (searchTerm: string) => {
+    if (loading) return
+    try {
+      setLoading(true)
+
+      const searchNorm = normalize(searchTerm)
+
+      // Try backend API
+      let result = await getProducts(userId, searchBufferSize, searchTerm)
+
+      // If no backend result → client-side filtering
+      if (!result.success || result.data.length === 0) {
+        const broadResult = await getProducts(userId, searchBufferSize * 2, "")
+
+        if (broadResult.success && broadResult.data.length > 0) {
+          const filteredProducts = broadResult.data.filter((product) => {
+            return (
+              normalize(product.name).includes(searchNorm) ||
+              normalize(product.company_name).includes(searchNorm) ||
+              (product.barcode && normalize(product.barcode).includes(searchNorm))
+            )
+          })
+
+          result = {
+            success: true,
+            data: filteredProducts.slice(0, searchBufferSize),
+          }
+        }
       }
+
+      if (result.success) {
+        setProducts(result.data)
+      } else {
+        console.error("Failed to search products:", result.message)
+        setProducts([])
+      }
+    } catch (error) {
+      console.error("Error searching products:", error)
+      setProducts([])
+    } finally {
+      setLoading(false)
     }
-    
-    if (result.success) {
-      setProducts(result.data);
-    } else {
-      console.error("Failed to search products:", result.message);
-      setProducts([]);
-    }
-  } catch (error) {
-    console.error("Error searching products:", error);
-    setProducts([]);
-  } finally {
-    setLoading(false);
   }
-};
-
-// NO addSimpleSpaces function needed!
-
 
   const fetchSelectedProduct = async (productId: number) => {
     try {
-      // Search by ID to get the selected product details
       const result = await getProducts(userId, 1, productId.toString())
       if (result.success && result.data.length > 0) {
         setSelectedProduct(result.data[0])
@@ -215,53 +191,44 @@ const searchProducts = async (searchTerm: string) => {
     }
   }
 
-  // Get items based on mode
   const items = isServiceMode ? services : products
 
-  // Filter services based on local search term (only for services, products are already filtered by API)
-  const filteredItems = isServiceMode && localSearchTerm.trim() !== ""
-    ? services.filter(
-        (item) =>
-          item.name.toLowerCase().includes(localSearchTerm.toLowerCase()) ||
-          (item.category && item.category.toLowerCase().includes(localSearchTerm.toLowerCase()))
-      )
-    : items
+  const filteredItems =
+    isServiceMode && localSearchTerm.trim() !== ""
+      ? services.filter(
+          (item) =>
+            normalize(item.name).includes(normalize(localSearchTerm)) ||
+            (item.category && normalize(item.category).includes(normalize(localSearchTerm)))
+        )
+      : items
 
-  // Handle item selection
   const handleItemSelect = (
-  itemId: number,
-  itemName: string,
-  price: number,
-  wholesalePrice?: number,
-  stock?: number,
-) => {
-  // ✅ lock correct name immediately
-  setSelectedProduct({
-    id: itemId,
-    name: itemName,
-    price,
-    wholesale_price: wholesalePrice,
-    stock,
-  })
+    itemId: number,
+    itemName: string,
+    price: number,
+    wholesalePrice?: number,
+    stock?: number
+  ) => {
+    setSelectedProduct({
+      id: itemId,
+      name: itemName,
+      price,
+      wholesale_price: wholesalePrice,
+      stock,
+    })
 
-  if (isServiceMode) {
-    onChange(itemId, itemName, price, 0, 999)
-  } else {
-    const finalPrice =
-      usePriceType === "wholesale" && wholesalePrice ? wholesalePrice : price
-    onChange(itemId, itemName, finalPrice, wholesalePrice, stock)
+    if (isServiceMode) {
+      onChange(itemId, itemName, price, 0, 999)
+    } else {
+      const finalPrice = usePriceType === "wholesale" && wholesalePrice ? wholesalePrice : price
+      onChange(itemId, itemName, finalPrice, wholesalePrice, stock)
+    }
+
+    setOpen(false)
+    setLocalSearchTerm("")
   }
 
-  setOpen(false)
-  setLocalSearchTerm("")
-}
-
-  // Handle dialog opening
-  const handleDialogOpen = () => {
-    setOpen(true)
-  }
-
-  // Handle dialog closing
+  const handleDialogOpen = () => setOpen(true)
   const handleDialogClose = () => {
     setOpen(false)
     setLocalSearchTerm("")
@@ -269,17 +236,12 @@ const searchProducts = async (searchTerm: string) => {
     setHasSearched(false)
   }
 
-  // Handle add new based on current mode
   const handleAddNew = () => {
     setOpen(false)
-    if (isServiceMode && onAddNewService) {
-      onAddNewService()
-    } else {
-      onAddNew()
-    }
+    if (isServiceMode && onAddNewService) onAddNewService()
+    else onAddNew()
   }
 
-  // Handle mode switch
   const handleModeSwitch = (checked: boolean) => {
     setIsServiceMode(checked)
     setLocalSearchTerm("")
@@ -354,14 +316,9 @@ const searchProducts = async (searchTerm: string) => {
                 )}
               </div>
 
-              {/* Only show service toggle if services are allowed */}
               {allowServices && (
                 <div className="flex items-center space-x-2">
-                  <Switch
-                    id="service-mode"
-                    checked={isServiceMode}
-                    onCheckedChange={handleModeSwitch}
-                  />
+                  <Switch id="service-mode" checked={isServiceMode} onCheckedChange={handleModeSwitch} />
                   <Label
                     htmlFor="service-mode"
                     className="flex items-center gap-2 cursor-pointer text-gray-700 dark:text-gray-300"
@@ -394,9 +351,7 @@ const searchProducts = async (searchTerm: string) => {
             ) : !hasSearched && !isServiceMode ? (
               <div className="p-4 text-center">
                 <Search className="h-8 w-8 mx-auto text-gray-400 mb-2" />
-                <p className="text-sm text-gray-500 dark:text-gray-400">
-                  Start typing to search products...
-                </p>
+                <p className="text-sm text-gray-500 dark:text-gray-400">Start typing to search products...</p>
               </div>
             ) : filteredItems.length === 0 ? (
               <div className="p-4 text-center">
@@ -407,7 +362,8 @@ const searchProducts = async (searchTerm: string) => {
             ) : (
               <div className="p-1">
                 <div className="text-xs font-medium text-gray-500 dark:text-gray-400 px-3 py-2">
-                  {isServiceMode ? "Services" : "Products"} ({filteredItems.length}{!isServiceMode && filteredItems.length === searchBufferSize ? "+" : ""})
+                  {isServiceMode ? "Services" : "Products"} ({filteredItems.length}
+                  {!isServiceMode && filteredItems.length === searchBufferSize ? "+" : ""})
                 </div>
                 <div>
                   {filteredItems.map((item) => (
@@ -421,7 +377,7 @@ const searchProducts = async (searchTerm: string) => {
                           item.name,
                           item.price,
                           isServiceMode ? 0 : item.wholesale_price,
-                          isServiceMode ? 999 : item.stock,
+                          isServiceMode ? 999 : item.stock
                         )
                       }
                     >
@@ -437,7 +393,7 @@ const searchProducts = async (searchTerm: string) => {
                             {item.name}
                           </span>
                           <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {!isServiceMode && item.wholesale_price > 0 && ` • Company: ${item.company_name} `} 
+                            {!isServiceMode && item.wholesale_price > 0 && ` • Company: ${item.company_name} `}
                             Price: {item.price}
                             {!isServiceMode && item.wholesale_price > 0 && ` • Wholesale: ${item.wholesale_price}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}
@@ -468,3 +424,4 @@ const searchProducts = async (searchTerm: string) => {
     </div>
   )
 }
+
