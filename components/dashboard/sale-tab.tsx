@@ -1026,18 +1026,26 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
           })
 
           if (result.data && result.data.sale) {
+            setLastSaleResult(result.data)
+            if (autoPrint) {
+              setTimeout(() => {
+                printSalesReceipt(result.data.sale, result.data.items)
+                resetAddSaleForm()
+                setFormAlert(null)
+                initializationRef.current.hasInitialized = false
+                fetchSalesFromAPI(false)
+              }, 500)
+            } else {
+              setShowPrintConfirm(true)
+            }
+          } else {
             setTimeout(() => {
-              printSalesReceipt(result.data.sale, result.data.items)
-            }, 500)
+              resetAddSaleForm()
+              setFormAlert(null)
+              initializationRef.current.hasInitialized = false
+              fetchSalesFromAPI(false)
+            }, 1500)
           }
-
-          setTimeout(() => {
-            resetAddSaleForm()
-            setFormAlert(null)
-            // Reset fetch state to force refresh
-            initializationRef.current.hasInitialized = false
-            fetchSalesFromAPI(false)
-          }, 1500)
         } else {
           setFormAlert({
             type: "error",
@@ -1405,6 +1413,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
       </Card>
     )
   }
+
+  // Add pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const salesPerPage = 7
+  const totalPages = Math.ceil(filteredSales.length / salesPerPage)
+  const paginatedSales = filteredSales.slice(
+    (currentPage - 1) * salesPerPage,
+    currentPage * salesPerPage
+  )
+
+  const [autoPrint, setAutoPrint] = useState(() => {
+    const saved = localStorage.getItem("autoPrintReceipt")
+    return saved === "true"
+  })
+  const [showPrintConfirm, setShowPrintConfirm] = useState(false)
+  const [lastSaleResult, setLastSaleResult] = useState<any>(null)
+  const [rememberChoice, setRememberChoice] = useState(false)
 
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
@@ -2300,9 +2325,41 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                   </div>
                 ) : (
                   <div className="p-2">
-                    {filteredSales.slice(0, 20).map((sale, index) => (
+                    {paginatedSales.map((sale, index) => (
                       <SaleCard key={sale.id} sale={sale} index={index} />
                     ))}
+                    {/* Pagination controls */}
+                    {totalPages > 1 && (
+                      <div className="flex justify-center mt-4 gap-2">
+                        <button
+                          className="w-8 h-8 rounded bg-white border border-gray-300 text-black hover:bg-gray-100 transition"
+                          disabled={currentPage === 1}
+                          onClick={() => setCurrentPage(currentPage - 1)}
+                        >
+                          &lt;
+                        </button>
+                        {Array.from({ length: totalPages }).map((_, i) => (
+                          <button
+                            key={i}
+                            className={`w-8 h-8 rounded border text-black font-semibold transition
+                              ${currentPage === i + 1
+                                ? "bg-red-600 text-white border-red-600"
+                                : "bg-white border-gray-300 hover:bg-gray-100"
+                              }`}
+                            onClick={() => setCurrentPage(i + 1)}
+                          >
+                            {i + 1}
+                          </button>
+                        ))}
+                        <button
+                          className="w-8 h-8 rounded bg-white border border-gray-300 text-black hover:bg-gray-100 transition"
+                          disabled={currentPage === totalPages}
+                          onClick={() => setCurrentPage(currentPage + 1)}
+                        >
+                          &gt;
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -2387,6 +2444,80 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
         onDelete={handleDeleteSaleFromView}
         onPrintInvoice={handlePrintInvoiceFromView}
       />
+
+      {/* Print Receipt Confirmation Dialog */}
+      {showPrintConfirm && lastSaleResult && (
+        <Dialog
+          open={showPrintConfirm}
+          onOpenChange={(open) => {
+            setShowPrintConfirm(open)
+            if (!open) {
+              // Reset form and refresh sales when dialog closes (by X or outside click)
+              resetAddSaleForm()
+              setFormAlert(null)
+              initializationRef.current.hasInitialized = false
+              fetchSalesFromAPI(false)
+            }
+          }}
+        >
+          <DialogContent className="max-w-sm bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-700">
+            <DialogHeader>
+              <DialogTitle className="text-gray-900 dark:text-gray-100">Print Receipt?</DialogTitle>
+            </DialogHeader>
+            <div className="py-4 space-y-4">
+              <div className="text-sm text-gray-700 dark:text-gray-300">
+                Sale completed successfully. Would you like to print the receipt?
+              </div>
+              <div className="flex gap-2 justify-end">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setShowPrintConfirm(false)
+                    resetAddSaleForm()
+                    setFormAlert(null)
+                    initializationRef.current.hasInitialized = false
+                    fetchSalesFromAPI(false)
+                  }}
+                  className="border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300"
+                >
+                  Skip Print
+                </Button>
+                <Button
+                  onClick={() => {
+                    printSalesReceipt(lastSaleResult.sale, lastSaleResult.items)
+                    setShowPrintConfirm(false)
+                    resetAddSaleForm()
+                    setFormAlert(null)
+                    initializationRef.current.hasInitialized = false
+                    fetchSalesFromAPI(false)
+                    if (rememberChoice) {
+                      setAutoPrint(true)
+                      localStorage.setItem("autoPrintReceipt", "true")
+                    }
+                  }}
+                  className="bg-blue-600 hover:bg-blue-700 text-white"
+                >
+                  Print Receipt
+                </Button>
+              </div>
+              <div className="flex items-center mt-2">
+                <input
+                  type="checkbox"
+                  id="remember-choice"
+                  checked={rememberChoice}
+                  onChange={e => setRememberChoice(e.target.checked)}
+                  className="mr-2"
+                />
+                <Label htmlFor="remember-choice" className="text-xs text-gray-700 dark:text-gray-300">
+                  Remember my choice (enable auto-print)
+                </Label>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
     </div>
   )
 }
+
+
