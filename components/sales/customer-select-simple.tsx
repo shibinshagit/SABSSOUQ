@@ -77,25 +77,23 @@ export default function CustomerSelectSimple({
     )
     setFilteredCustomers(filtered)
 
-    // If no results and we don't already have the inline form open, open it and transfer the search value
-    if (filtered.length === 0 && searchTerm.trim() && !showForm) {
-  const currentSearchTerm = searchTerm.trim()
-  const cleaned = currentSearchTerm.replace(/[^\d]/g, "") // keep only digits
-
-  const isAllDigits = /^\d+$/.test(cleaned) // ✅ check if all digits
-
-  if (isAllDigits && cleaned.length > 0) {
-    // Autofill phone field always for numeric input
-    setFormData({ name: "", phone: currentSearchTerm })
-  } else {
-    // Autofill name field
-    setFormData({ name: currentSearchTerm, phone: "" })
-  }
-
-  setShowForm(true)
-  setSearchTerm("") // clear search box so editing the form doesn't touch the search field
-}
-
+    // Only open inline form if search term is at least 3 characters
+    if (
+      filtered.length === 0 &&
+      searchTerm.trim().length >= 3 &&
+      !showForm
+    ) {
+      const currentSearchTerm = searchTerm.trim()
+      const cleaned = currentSearchTerm.replace(/[^\d]/g, "")
+      const isAllDigits = /^\d+$/.test(cleaned)
+      if (isAllDigits && cleaned.length > 0) {
+        setFormData({ name: "", phone: currentSearchTerm })
+      } else {
+        setFormData({ name: currentSearchTerm, phone: "" })
+      }
+      setShowForm(true)
+      setSearchTerm("")
+    }
   }, [searchTerm, customers, showForm])
 
   // Focus correct input once showForm or formData changes
