@@ -8,188 +8,185 @@ export function toArabicNumerals(str: string): string {
 
 // Generate a valid EAN-13 barcode with proper check digit
 export function generateEAN13(): string {
-  // Start with a standard prefix (e.g., 200 for in-store products)
   let code = "200"
-
-  // Generate 9 random digits for the middle part
   for (let i = 0; i < 9; i++) {
     code += Math.floor(Math.random() * 10).toString()
   }
-
-  // Calculate check digit according to EAN-13 algorithm
   let sum = 0
   for (let i = 0; i < 12; i++) {
     sum += Number.parseInt(code[i]) * (i % 2 === 0 ? 1 : 3)
   }
   const checkDigit = (10 - (sum % 10)) % 10
-
   return code + checkDigit
 }
 
 // Validate an EAN-13 barcode
 export function validateEAN13(barcode: string): boolean {
-  // Check if it's exactly 13 digits
   if (!/^\d{13}$/.test(barcode)) {
     return false
   }
-
-  // Calculate check digit
   let sum = 0
   for (let i = 0; i < 12; i++) {
     sum += Number.parseInt(barcode[i]) * (i % 2 === 0 ? 1 : 3)
   }
   const calculatedCheckDigit = (10 - (sum % 10)) % 10
-
-  // Compare with the provided check digit
   return calculatedCheckDigit === Number.parseInt(barcode[12])
 }
 
-// Function to encode a number using Alphabetic Digit Cipher (A=1, B=2, ..., I=9, J=0)
+// Function to encode a number using Alphabetic Digit Cipher
 export function encodeNumberAsLetters(num: number): string {
   if (num <= 0) return ""
-
-  // Convert the number to a string
   const numStr = num.toString()
   let result = ""
-
-  // Map each digit to its corresponding letter
   for (let i = 0; i < numStr.length; i++) {
     const digit = Number.parseInt(numStr[i])
-    // A=1, B=2, ..., I=9, J=0
     if (digit === 0) {
       result += "J"
     } else {
-      // ASCII code for 'A' is 65, so we add digit-1 to get the correct letter
       result += String.fromCharCode(64 + digit)
     }
   }
-
   return result
 }
 
-// Update the printBarcodeSticker function to use AED as default currency
+// Print single barcode sticker - TVS LP40 DLITE PLUS format (38x25mm, 2 per row)
 export function printBarcodeSticker(product: any, currency = "AED") {
   if (!product) return
 
-  // Format the product code (ID) as a 4-digit number
   const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
-
-  // Format the price with 2 decimal places
-  const price =
-    typeof product.price === "number"
-      ? product.price.toFixed(2)
-      : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
-
-  // Convert price to Arabic numerals
+  const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
   const arabicPrice = toArabicNumerals(price)
-
-  // Ensure barcode is valid EAN-13
+  
   let barcodeValue = product.barcode || ""
   if (!barcodeValue || !validateEAN13(barcodeValue)) {
     barcodeValue = generateEAN13()
   }
 
-  // Get wholesale price and encode it
-  const wholesalePrice =
-    typeof product.wholesale_price === "number"
-      ? product.wholesale_price
-      : Number.parseFloat(product.wholesale_price || "0") || 0
-
-  // Encode the wholesale price as letters using Alphabetic Digit Cipher
+  const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(product.wholesale_price || "0") || 0
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
-  // Create a new window for printing
   const printWindow = window.open("", "_blank")
   if (!printWindow) {
     alert("Please allow pop-ups to print price tags")
     return
   }
 
-  // Set the content of the print window
   printWindow.document.write(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Price Tag</title>
+      <title>TVS LP40 Price Tag - ${product.name}</title>
       <style>
-        @media print {
-          @page {
-            size: 30mm 20mm; /* 3cm x 2cm */
-            margin: 0;
-          }
-          body {
-            margin: 0;
-            padding: 0;
-            width: 30mm;
-            height: 20mm;
-          }
-          .no-print {
-            display: none;
-          }
+        @page {
+          size: 80mm auto;
+          margin: 0;
+        }
+        
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
         }
         
         body {
-          margin: 0;
-          padding: 0;
-          width: 30mm; /* 3cm */
-          height: 20mm; /* 2cm */
           font-family: Arial, sans-serif;
-          box-sizing: border-box;
-          display: flex;
-          justify-content: center;
-          align-items: center;
+          width: 80mm;
+          min-width: 80mm;
+          max-width: 80mm;
+          margin: 0;
+          padding: 2mm;
+          background: #f0f0f0;
         }
         
-        .tag {
-          width: 28mm; /* 30mm - 2mm padding */
-          height: 18mm; /* 20mm - 2mm padding */
-          border: 0.2mm solid black;
-          border-radius: 1mm;
+        .sticker-row {
+          width: 76mm;
+          display: flex;
+          flex-direction: row;
+          gap: 2mm;
+          page-break-inside: avoid;
+          margin-bottom: 2mm;
+        }
+        
+        .sticker {
+          width: 37mm;
+          min-width: 37mm;
+          max-width: 37mm;
+          height: 24mm;
+          min-height: 24mm;
+          max-height: 24mm;
+          border: 1px solid #000;
+          border-radius: 2mm;
           padding: 1mm;
-          box-sizing: border-box;
-          display: grid;
-          grid-template-rows: auto auto auto auto;
-          background-color: white;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          background: white;
+          position: relative;
+          page-break-inside: avoid;
         }
         
         .company-name {
-          font-size: 6pt;
+          font-size: 5.5pt;
           font-weight: bold;
           text-align: center;
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          line-height: 1.1;
+          max-height: 2.5mm;
+        }
+        
+        .encoded-price {
+          position: absolute;
+          top: 1mm;
+          right: 1mm;
+          font-size: 5pt;
+          font-weight: bold;
+          color: #000;
+          background: rgba(255,255,255,0.8);
+          padding: 0.5mm;
+          border-radius: 0.5mm;
         }
         
         .product-info {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
+          gap: 1mm;
         }
         
         .product-name {
-          font-size: 5pt;
+          font-size: 6pt;
           font-weight: bold;
-          max-width: 70%;
-          white-space: nowrap;
+          flex: 1;
+          line-height: 1.2;
           overflow: hidden;
           text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          color: #000;
         }
         
         .product-code {
-          font-size: 4pt;
-          text-align: right;
+          font-size: 5pt;
+          color: #000;
+          font-weight: bold;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
         
         .barcode-container {
           display: flex;
           flex-direction: column;
           align-items: center;
+          justify-content: center;
+          flex: 1;
         }
         
         .barcode {
-          width: 26mm;
-          height: 7mm;
+          width: 33mm;
+          height: 8mm;
         }
         
         .barcode-number {
@@ -201,25 +198,32 @@ export function printBarcodeSticker(product: any, currency = "AED") {
         .price-container {
           display: flex;
           justify-content: space-between;
-          font-size: 6pt;
-          font-weight: bold;
+          align-items: center;
+          border-top: 0.5px solid #ccc;
+          padding-top: 0.5mm;
+          gap: 1mm;
         }
         
         .price-english {
-          text-align: left;
+          font-size: 8pt;
+          font-weight: bold;
+          white-space: nowrap;
+          color: #000;
         }
         
         .price-arabic {
-          text-align: right;
+          font-size: 7pt;
+          font-weight: bold;
           direction: rtl;
+          white-space: nowrap;
+          color: #000;
         }
         
         .print-button {
           position: fixed;
-          top: 30mm;
-          left: 50%;
-          transform: translateX(-50%);
-          padding: 8px 16px;
+          top: 10px;
+          right: 10px;
+          padding: 10px 20px;
           background: #4CAF50;
           color: white;
           border: none;
@@ -227,57 +231,82 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           cursor: pointer;
           font-size: 16px;
           font-weight: bold;
+          z-index: 1000;
+          box-shadow: 0 2px 5px rgba(0,0,0,0.3);
         }
         
-        .encoded-price {
-          position: absolute;
-          top: 1mm;
-          right: 1mm;
-          font-size: 4pt;
-          font-weight: bold;
-        }
-        
-        @media screen {
+        @media print {
           body {
-            background: #f0f0f0;
-            padding: 20px;
-            height: auto;
-            min-height: 100vh;
+            background: white;
+            padding: 0;
+          }
+          .no-print {
+            display: none !important;
           }
         }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
     <body>
-      <div class="tag">
-        <div class="company-name">${product.company_name || "Al Aneeq"}</div>
-        ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
-        <div class="product-info">
-          <div class="product-name">${product.name || "Product"}</div>
-          <div class="product-code">${productCode}</div>
+      <button class="print-button no-print" onclick="window.print()">Print</button>
+      
+      <div class="sticker-row">
+        <div class="sticker">
+          <div class="company-name">${product.company_name || "Al Aneeq"}</div>
+          ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
+          <div class="product-info">
+            <div class="product-name">${product.name || "Product"}</div>
+            <div class="product-code">#${productCode}</div>
+          </div>
+          <div class="barcode-container">
+            <svg class="barcode" id="barcode1"></svg>
+            <div class="barcode-number">${barcodeValue}</div>
+          </div>
+          <div class="price-container">
+            <div class="price-english">${currency} ${price}</div>
+            <div class="price-arabic">${arabicPrice} ${currency}</div>
+          </div>
         </div>
-        <div class="barcode-container">
-          <svg class="barcode" id="barcode"></svg>
-          <div class="barcode-number">${barcodeValue}</div>
-        </div>
-        <div class="price-container">
-          <div class="price-english">${currency}: ${price}</div>
+        
+        <div class="sticker">
+          <div class="company-name">${product.company_name || "Al Aneeq"}</div>
+          ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
+          <div class="product-info">
+            <div class="product-name">${product.name || "Product"}</div>
+            <div class="product-code">#${productCode}</div>
+          </div>
+          <div class="barcode-container">
+            <svg class="barcode" id="barcode2"></svg>
+            <div class="barcode-number">${barcodeValue}</div>
+          </div>
+          <div class="price-container">
+            <div class="price-english">${currency} ${price}</div>
+            <div class="price-arabic">${arabicPrice} ${currency}</div>
+          </div>
         </div>
       </div>
 
-      <button class="print-button no-print" onclick="window.print()">Print</button>
-
       <script>
-        JsBarcode("#barcode", "${barcodeValue}", {
-          format: "EAN13",
-          width: 1,
-          height: 25,
-          displayValue: false,
-          margin: 0,
-          fontSize: 0
-        });
+        try {
+          JsBarcode("#barcode1", "${barcodeValue}", {
+            format: "EAN13",
+            width: 1,
+            height: 30,
+            displayValue: false,
+            margin: 0
+          });
+          
+          JsBarcode("#barcode2", "${barcodeValue}", {
+            format: "EAN13",
+            width: 1,
+            height: 30,
+            displayValue: false,
+            margin: 0
+          });
+        } catch (error) {
+          console.error("Barcode generation error:", error);
+        }
         
-        // Auto print after a short delay
         setTimeout(() => {
           window.print();
         }, 1000);
@@ -289,117 +318,135 @@ export function printBarcodeSticker(product: any, currency = "AED") {
   printWindow.document.close()
 }
 
-// Update the printMultipleBarcodeStickers function to use AED as default currency
+// Print multiple barcode stickers - TVS LP40 format
 export function printMultipleBarcodeStickers(products: any[], copies = 1, currency = "AED") {
   if (!products || products.length === 0) return
 
-  // Create a new window for printing
   const printWindow = window.open("", "_blank")
   if (!printWindow) {
     alert("Please allow pop-ups to print price tags")
     return
   }
 
-  // Start building the HTML content
-  let tagsHtml = ""
+  let stickerRows = ""
+  let barcodeScripts = ""
+  let barcodeIndex = 0
+  let totalStickers = 0
 
-  // Generate HTML for each product, repeated by the number of copies
   products.forEach((product) => {
-    // Format the product code (ID) as a 4-digit number
     const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
-
-    // Format the price with 2 decimal places
-    const price =
-      typeof product.price === "number"
-        ? product.price.toFixed(2)
-        : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
-
-    // Convert price to Arabic numerals
+    const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
     const arabicPrice = toArabicNumerals(price)
-
-    // Ensure barcode is valid EAN-13
+    
     let barcodeValue = product.barcode || ""
     if (!barcodeValue || !validateEAN13(barcodeValue)) {
       barcodeValue = generateEAN13()
     }
 
-    // Get wholesale price and encode it
-    const wholesalePrice =
-      typeof product.wholesale_price === "number"
-        ? product.wholesale_price
-        : Number.parseFloat(product.wholesale_price || "0") || 0
-
-    // Encode the wholesale price as letters using Alphabetic Digit Cipher
+    const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(product.wholesale_price || "0") || 0
     const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
-    // Add the specified number of copies
-    for (let i = 0; i < copies; i++) {
-      tagsHtml += `
-        <div class="tag" data-barcode="${barcodeValue}">
+    for (let copy = 0; copy < copies; copy++) {
+      if (totalStickers % 2 === 0) {
+        stickerRows += '<div class="sticker-row">'
+      }
+      
+      const barcodeId = `barcode${barcodeIndex}`
+      barcodeIndex++
+      totalStickers++
+
+      stickerRows += `
+        <div class="sticker">
           <div class="company-name">${product.company_name || "Al Aneeq"}</div>
           ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
           <div class="product-info">
             <div class="product-name">${product.name || "Product"}</div>
-          <div class="product-code">${productCode}</div>
+            <div class="product-code">#${productCode}</div>
           </div>
           <div class="barcode-container">
-            <svg class="barcode barcode-${barcodeValue.replace(/[^0-9]/g, "")}-${i}"></svg>
+            <svg class="barcode" id="${barcodeId}"></svg>
             <div class="barcode-number">${barcodeValue}</div>
           </div>
           <div class="price-container">
-            <div class="price-english">${currency}: ${price}</div>
+            <div class="price-english">${currency} ${price}</div>
+            <div class="price-arabic">${arabicPrice} ${currency}</div>
           </div>
         </div>
+      `
+
+      if (totalStickers % 2 === 0) {
+        stickerRows += '</div>'
+      }
+
+      barcodeScripts += `
+        JsBarcode("#${barcodeId}", "${barcodeValue}", {
+          format: "EAN13",
+          width: 1,
+          height: 30,
+          displayValue: false,
+          margin: 0
+        });
       `
     }
   })
 
-  // Set the content of the print window
+  // Close last row if odd number of stickers
+  if (totalStickers % 2 !== 0) {
+    stickerRows += '</div>'
+  }
+
   printWindow.document.write(`
     <!DOCTYPE html>
     <html>
     <head>
-      <title>Price Tags</title>
+      <title>TVS LP40 Batch Print - ${totalStickers} stickers</title>
       <style>
-        @media print {
-          @page {
-            size: auto;
-            margin: 0;
-          }
-          body {
-            margin: 0;
-            padding: 0;
-          }
-          .no-print {
-            display: none;
-          }
+        @page {
+          size: 80mm auto;
+          margin: 0;
+        }
+        
+        * {
+          margin: 0;
+          padding: 0;
+          box-sizing: border-box;
         }
         
         body {
-          margin: 0;
-          padding: 10px;
           font-family: Arial, sans-serif;
+          width: 80mm;
+          min-width: 80mm;
+          max-width: 80mm;
+          margin: 0;
+          padding: 2mm;
+          background: #f0f0f0;
         }
         
-        .tags-container {
+        .sticker-row {
+          width: 76mm;
           display: flex;
-          flex-wrap: wrap;
+          flex-direction: row;
           gap: 2mm;
-          justify-content: flex-start;
+          page-break-inside: avoid;
+          margin-bottom: 2mm;
         }
         
-        .tag {
-          width: 28mm;
-          height: 18mm;
-          border: 0.2mm solid black;
-          border-radius: 1mm;
+        .sticker {
+          width: 37mm;
+          min-width: 37mm;
+          max-width: 37mm;
+          height: 24mm;
+          min-height: 24mm;
+          max-height: 24mm;
+          border: 1px solid #000;
+          border-radius: 2mm;
           padding: 1mm;
-          box-sizing: border-box;
-          display: grid;
-          grid-template-rows: auto auto auto auto;
-          background-color: white;
-          page-break-inside: avoid;
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          background: white;
           position: relative;
+          page-break-inside: avoid;
         }
         
         .company-name {
@@ -409,37 +456,55 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           white-space: nowrap;
           overflow: hidden;
           text-overflow: ellipsis;
+          line-height: 1.2;
+        }
+        
+        .encoded-price {
+          position: absolute;
+          top: 1mm;
+          right: 1mm;
+          font-size: 4pt;
+          font-weight: bold;
+          color: #666;
         }
         
         .product-info {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
+          gap: 1mm;
         }
         
         .product-name {
           font-size: 5pt;
           font-weight: bold;
-          max-width: 70%;
-          white-space: nowrap;
+          flex: 1;
+          line-height: 1.1;
           overflow: hidden;
           text-overflow: ellipsis;
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
         }
         
         .product-code {
           font-size: 4pt;
-          text-align: right;
+          color: #666;
+          white-space: nowrap;
+          flex-shrink: 0;
         }
         
         .barcode-container {
           display: flex;
           flex-direction: column;
           align-items: center;
+          justify-content: center;
+          flex: 1;
         }
         
         .barcode {
-          width: 26mm;
-          height: 7mm;
+          width: 33mm;
+          height: 8mm;
         }
         
         .barcode-number {
@@ -451,25 +516,23 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
         .price-container {
           display: flex;
           justify-content: space-between;
-          font-size: 6pt;
-          font-weight: bold;
+          align-items: center;
+          border-top: 0.5px solid #ccc;
+          padding-top: 0.5mm;
+          gap: 1mm;
         }
         
         .price-english {
-          text-align: left;
+          font-size: 7pt;
+          font-weight: bold;
+          white-space: nowrap;
         }
         
         .price-arabic {
-          text-align: right;
-          direction: rtl;
-        }
-        
-        .encoded-price {
-          position: absolute;
-          top: 1mm;
-          right: 1mm;
-          font-size: 4pt;
+          font-size: 6pt;
           font-weight: bold;
+          direction: rtl;
+          white-space: nowrap;
         }
         
         .controls {
@@ -477,14 +540,14 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           top: 10px;
           right: 10px;
           background: white;
-          padding: 10px;
-          border-radius: 4px;
-          box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+          padding: 15px;
+          border-radius: 8px;
+          box-shadow: 0 4px 10px rgba(0,0,0,0.3);
           z-index: 1000;
         }
         
         .print-button {
-          padding: 8px 16px;
+          padding: 10px 20px;
           background: #4CAF50;
           color: white;
           border: none;
@@ -492,12 +555,16 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           cursor: pointer;
           font-size: 16px;
           font-weight: bold;
-          margin-top: 10px;
+          width: 100%;
         }
         
-        @media screen {
+        @media print {
           body {
-            background: #f0f0f0;
+            background: white;
+            padding: 0;
+          }
+          .no-print {
+            display: none !important;
           }
         }
       </style>
@@ -505,43 +572,26 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     </head>
     <body>
       <div class="controls no-print">
-        <h3>Batch Print Price Tags</h3>
-        <p>Total tags: ${products.length * copies}</p>
-        <button class="print-button" onclick="window.print()">Print All Tags</button>
+        <h3 style="margin-bottom: 10px;">TVS LP40 Batch Print</h3>
+        <p><strong>Total stickers:</strong> ${totalStickers}</p>
+        <p><strong>Products:</strong> ${products.length}</p>
+        <p><strong>Copies each:</strong> ${copies}</p>
+        <p><strong>Format:</strong> 38×25mm</p>
+        <button class="print-button" onclick="window.print()">Print All</button>
       </div>
       
-      <div class="tags-container">
-        ${tagsHtml}
-      </div>
+      ${stickerRows}
 
       <script>
-        // Function to render all barcodes
-        function renderBarcodes() {
-          // Get all tags
-          const tags = document.querySelectorAll('.tag');
-          
-          // Configure each barcode
-          tags.forEach((tag) => {
-            const barcodeValue = tag.getAttribute('data-barcode');
-            const barcodeElement = tag.querySelector('.barcode');
-            
-            if (barcodeElement && barcodeValue) {
-              JsBarcode(barcodeElement, barcodeValue, {
-                format: "EAN13",
-                width: 1,
-                height: 25,
-                displayValue: false,
-                margin: 0,
-                fontSize: 0
-              });
-            }
-          });
+        console.log("🎯 Batch print loaded - ${totalStickers} stickers");
+        
+        try {
+          ${barcodeScripts}
+          console.log("✅ All barcodes generated successfully");
+        } catch (error) {
+          console.error("❌ Barcode generation error:", error);
         }
         
-        // Render all barcodes
-        renderBarcodes();
-        
-        // Auto print after a short delay
         setTimeout(() => {
           window.print();
         }, 1500);
