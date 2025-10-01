@@ -49,14 +49,14 @@ export function encodeNumberAsLetters(num: number): string {
   return result
 }
 
-// Print single barcode sticker - TVS LP40 DLITE PLUS format (38x25mm, 2 per row)
+// Print barcode sticker with quantity control
 export function printBarcodeSticker(product: any, currency = "AED") {
   if (!product) return
 
   const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
   const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
   const arabicPrice = toArabicNumerals(price)
-  
+
   let barcodeValue = product.barcode || ""
   if (!barcodeValue || !validateEAN13(barcodeValue)) {
     barcodeValue = generateEAN13()
@@ -77,239 +77,107 @@ export function printBarcodeSticker(product: any, currency = "AED") {
     <head>
       <title>TVS LP40 Price Tag - ${product.name}</title>
       <style>
-        @page {
-          size: 80mm auto;
-          margin: 0;
-        }
-        
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        
-        body {
-          font-family: Arial, sans-serif;
-          width: 80mm;
-          min-width: 80mm;
-          max-width: 80mm;
-          margin: 0;
-          padding: 2mm;
-          background: #f0f0f0;
-        }
-        
-        .sticker-row {
-          width: 76mm;
-          display: flex;
-          flex-direction: row;
-          gap: 2mm;
-          page-break-inside: avoid;
-          margin-bottom: 2mm;
-        }
-        
-        .sticker {
-          width: 37mm;
-          min-width: 37mm;
-          max-width: 37mm;
-          height: 24mm;
-          min-height: 24mm;
-          max-height: 24mm;
-          border: 1px solid #000;
-          border-radius: 2mm;
-          padding: 1mm;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          background: white;
-          position: relative;
-          page-break-inside: avoid;
-        }
-        
-        .company-name {
-          font-size: 5.5pt;
-          font-weight: bold;
-          text-align: center;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          line-height: 1.1;
-          max-height: 2.5mm;
-        }
-        
-        .encoded-price {
-          position: absolute;
-          top: 1mm;
-          right: 1mm;
-          font-size: 5pt;
-          font-weight: bold;
-          color: #000;
-          background: rgba(255,255,255,0.8);
-          padding: 0.5mm;
-          border-radius: 0.5mm;
-        }
-        
-        .product-info {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 1mm;
-        }
-        
-        .product-name {
-          font-size: 6pt;
-          font-weight: bold;
-          flex: 1;
-          line-height: 1.2;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-          color: #000;
-        }
-        
-        .product-code {
-          font-size: 5pt;
-          color: #000;
-          font-weight: bold;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-        
-        .barcode-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          flex: 1;
-        }
-        
-        .barcode {
-          width: 33mm;
-          height: 8mm;
-        }
-        
-        .barcode-number {
-          font-size: 4pt;
-          text-align: center;
-          margin-top: 0.5mm;
-        }
-        
-        .price-container {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          border-top: 0.5px solid #ccc;
-          padding-top: 0.5mm;
-          gap: 1mm;
-        }
-        
-        .price-english {
-          font-size: 8pt;
-          font-weight: bold;
-          white-space: nowrap;
-          color: #000;
-        }
-        
-        .price-arabic {
-          font-size: 7pt;
-          font-weight: bold;
-          direction: rtl;
-          white-space: nowrap;
-          color: #000;
-        }
-        
-        .print-button {
-          position: fixed;
-          top: 10px;
-          right: 10px;
-          padding: 10px 20px;
-          background: #4CAF50;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 16px;
-          font-weight: bold;
-          z-index: 1000;
-          box-shadow: 0 2px 5px rgba(0,0,0,0.3);
-        }
-        
-        @media print {
-          body {
-            background: white;
-            padding: 0;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family: Arial, sans-serif; width: 80mm; padding: 2mm; background: #f0f0f0; }
+        .controls { position: fixed; top: 10px; right: 10px; background: white; padding: 15px; border-radius: 8px; box-shadow: 0 4px 10px rgba(0,0,0,0.3); z-index: 1000; min-width: 200px; }
+        .quantity-control { display: flex; align-items: center; justify-content: center; gap: 10px; margin: 15px 0; }
+        .quantity-btn { width: 40px; height: 40px; border: 2px solid #2196F3; background: white; color: #2196F3; font-size: 24px; font-weight: bold; border-radius: 4px; cursor: pointer; }
+        .quantity-btn:hover { background: #2196F3; color: white; }
+        .quantity-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+        .quantity-display { font-size: 24px; font-weight: bold; min-width: 50px; text-align: center; padding: 8px; border: 2px solid #ddd; border-radius: 4px; }
+        .print-button { padding: 12px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
+        .print-button:hover { background: #45a049; }
+        .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
+        .sticker { width: 32mm; height: 22mm; border: 1px solid #000; border-radius: 2mm; padding: 1mm; display: flex; flex-direction: column; justify-content: space-between; background: white; position: relative; }
+        .company-name { font-size: 4.5pt; font-weight: bold; text-align: center; }
+        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 4pt; font-weight: bold; }
+        .product-info { display: flex; justify-content: space-between; font-size: 5pt; font-weight: bold; }
+        .barcode { width: 28mm; height: 7mm; }
+        .barcode-number { font-size: 4pt; text-align: center; }
+        .price-container { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; }
+        @media print { body { background: white; padding: 0; } .no-print { display: none !important; } }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
     <body>
-      <button class="print-button no-print" onclick="window.print()">Print</button>
-      
-      <div class="sticker-row">
-        <div class="sticker">
-          <div class="company-name">${product.company_name || "Al Aneeq"}</div>
-          ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
-          <div class="product-info">
-            <div class="product-name">${product.name || "Product"}</div>
-            <div class="product-code">#${productCode}</div>
-          </div>
-          <div class="barcode-container">
-            <svg class="barcode" id="barcode1"></svg>
-            <div class="barcode-number">${barcodeValue}</div>
-          </div>
-          <div class="price-container">
-            <div class="price-english">${currency} ${price}</div>
-            <div class="price-arabic">${arabicPrice} ${currency}</div>
-          </div>
+      <div class="controls no-print">
+        <h3 style="margin-bottom: 10px; text-align: center;">Print Stickers</h3>
+        <div style="text-align: center; font-size: 14px; color: #666; margin-bottom: 5px;">Quantity</div>
+        <div class="quantity-control">
+          <button class="quantity-btn" id="decreaseBtn" onclick="updateQuantity(-1)">−</button>
+          <div class="quantity-display" id="quantityDisplay">1</div>
+          <button class="quantity-btn" onclick="updateQuantity(1)">+</button>
         </div>
-        
-        <div class="sticker">
-          <div class="company-name">${product.company_name || "Al Aneeq"}</div>
-          ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
-          <div class="product-info">
-            <div class="product-name">${product.name || "Product"}</div>
-            <div class="product-code">#${productCode}</div>
-          </div>
-          <div class="barcode-container">
-            <svg class="barcode" id="barcode2"></svg>
-            <div class="barcode-number">${barcodeValue}</div>
-          </div>
-          <div class="price-container">
-            <div class="price-english">${currency} ${price}</div>
-            <div class="price-arabic">${arabicPrice} ${currency}</div>
-          </div>
+        <div style="text-align: center; font-size: 12px; color: #888; margin-bottom: 10px;">
+          <span id="rowsInfo">1 sticker</span>
         </div>
+        <button class="print-button" onclick="window.print()">Print</button>
       </div>
+      
+      <div id="stickerContainer"></div>
 
       <script>
-        try {
-          JsBarcode("#barcode1", "${barcodeValue}", {
-            format: "EAN13",
-            width: 1,
-            height: 30,
-            displayValue: false,
-            margin: 0
-          });
+        let currentQuantity = 1;
+        const productData = {
+          companyName: "${(product.company_name || "Al Aneeq").replace(/"/g, '\\"')}",
+          encodedPrice: "${encodedWholesalePrice}",
+          productName: "${(product.name || "Product").replace(/"/g, '\\"')}",
+          productCode: "${productCode}",
+          barcodeValue: "${barcodeValue}",
+          currency: "${currency}",
+          price: "${price}",
+          arabicPrice: "${arabicPrice}"
+        };
+        
+        function updateQuantity(change) {
+          currentQuantity = Math.max(1, currentQuantity + change);
+          document.getElementById('quantityDisplay').textContent = currentQuantity;
+          document.getElementById('decreaseBtn').disabled = currentQuantity <= 1;
           
-          JsBarcode("#barcode2", "${barcodeValue}", {
-            format: "EAN13",
-            width: 1,
-            height: 30,
-            displayValue: false,
-            margin: 0
-          });
-        } catch (error) {
-          console.error("Barcode generation error:", error);
+          const rows = Math.ceil(currentQuantity / 2);
+          const stickerText = currentQuantity === 1 ? '1 sticker' : currentQuantity + ' stickers';
+          const rowText = rows === 1 ? '1 row' : rows + ' rows';
+          document.getElementById('rowsInfo').textContent = stickerText + ' (' + rowText + ')';
+          
+          renderStickers();
         }
         
-        setTimeout(() => {
-          window.print();
-        }, 1000);
+        function renderStickers() {
+          const container = document.getElementById('stickerContainer');
+          let html = '';
+          
+          for (let i = 0; i < currentQuantity; i++) {
+            if (i % 2 === 0) html += '<div class="sticker-row">';
+            
+            html += '<div class="sticker">' +
+              '<div class="company-name">' + productData.companyName + '</div>' +
+              (productData.encodedPrice ? '<div class="encoded-price">' + productData.encodedPrice + '</div>' : '') +
+              '<div class="product-info">' +
+                '<div>' + productData.productName + '</div>' +
+                '<div>#' + productData.productCode + '</div>' +
+              '</div>' +
+              '<svg class="barcode" id="barcode' + i + '"></svg>' +
+              '<div class="barcode-number">' + productData.barcodeValue + '</div>' +
+              '<div class="price-container">' +
+                '<span>' + productData.currency + ' ' + productData.price + '</span>' +
+                '<span>' + productData.arabicPrice + ' ' + productData.currency + '</span>' +
+              '</div>' +
+            '</div>';
+            
+            if (i % 2 === 1 || i === currentQuantity - 1) html += '</div>';
+          }
+          
+          container.innerHTML = html;
+          
+          for (let i = 0; i < currentQuantity; i++) {
+            JsBarcode("#barcode" + i, productData.barcodeValue, {
+              format: "EAN13", width: 1, height: 30, displayValue: false, margin: 0
+            });
+          }
+        }
+        
+        renderStickers();
+        document.getElementById('decreaseBtn').disabled = true;
       </script>
     </body>
     </html>
@@ -318,7 +186,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
   printWindow.document.close()
 }
 
-// Print multiple barcode stickers - TVS LP40 format
+// Print multiple stickers (at most 2 per row)
 export function printMultipleBarcodeStickers(products: any[], copies = 1, currency = "AED") {
   if (!products || products.length === 0) return
 
@@ -337,7 +205,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
     const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
     const arabicPrice = toArabicNumerals(price)
-    
+
     let barcodeValue = product.barcode || ""
     if (!barcodeValue || !validateEAN13(barcodeValue)) {
       barcodeValue = generateEAN13()
@@ -350,7 +218,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
       if (totalStickers % 2 === 0) {
         stickerRows += '<div class="sticker-row">'
       }
-      
+
       const barcodeId = `barcode${barcodeIndex}`
       barcodeIndex++
       totalStickers++
@@ -360,16 +228,14 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           <div class="company-name">${product.company_name || "Al Aneeq"}</div>
           ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
           <div class="product-info">
-            <div class="product-name">${product.name || "Product"}</div>
-            <div class="product-code">#${productCode}</div>
+            <div>${product.name || "Product"}</div>
+            <div>#${productCode}</div>
           </div>
-          <div class="barcode-container">
-            <svg class="barcode" id="${barcodeId}"></svg>
-            <div class="barcode-number">${barcodeValue}</div>
-          </div>
+          <svg class="barcode" id="${barcodeId}"></svg>
+          <div class="barcode-number">${barcodeValue}</div>
           <div class="price-container">
-            <div class="price-english">${currency} ${price}</div>
-            <div class="price-arabic">${arabicPrice} ${currency}</div>
+            <span>${currency} ${price}</span>
+            <span>${arabicPrice} ${currency}</span>
           </div>
         </div>
       `
@@ -390,7 +256,6 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     }
   })
 
-  // Close last row if odd number of stickers
   if (totalStickers % 2 !== 0) {
     stickerRows += '</div>'
   }
@@ -401,200 +266,30 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     <head>
       <title>TVS LP40 Batch Print - ${totalStickers} stickers</title>
       <style>
-        @page {
-          size: 80mm auto;
-          margin: 0;
-        }
-        
-        * {
-          margin: 0;
-          padding: 0;
-          box-sizing: border-box;
-        }
-        
-        body {
-          font-family: Arial, sans-serif;
-          width: 80mm;
-          min-width: 80mm;
-          max-width: 80mm;
-          margin: 0;
-          padding: 2mm;
-          background: #f0f0f0;
-        }
-        
-        .sticker-row {
-          width: 76mm;
-          display: flex;
-          flex-direction: row;
-          gap: 2mm;
-          page-break-inside: avoid;
-          margin-bottom: 2mm;
-        }
-        
+        @page { size: 80mm auto; margin: 0; }
+        body { font-family: Arial, sans-serif; width: 80mm; padding: 2mm; }
+        .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker {
-          width: 37mm;
-          min-width: 37mm;
-          max-width: 37mm;
-          height: 24mm;
-          min-height: 24mm;
-          max-height: 24mm;
-          border: 1px solid #000;
-          border-radius: 2mm;
-          padding: 1mm;
-          display: flex;
-          flex-direction: column;
-          justify-content: space-between;
-          background: white;
+          width: 32mm; height: 22mm;
+          border: 1px solid #000; border-radius: 2mm;
+          padding: 1mm; display: flex; flex-direction: column;
+          justify-content: space-between; background: white;
           position: relative;
-          page-break-inside: avoid;
         }
-        
-        .company-name {
-          font-size: 6pt;
-          font-weight: bold;
-          text-align: center;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          line-height: 1.2;
-        }
-        
-        .encoded-price {
-          position: absolute;
-          top: 1mm;
-          right: 1mm;
-          font-size: 4pt;
-          font-weight: bold;
-          color: #666;
-        }
-        
-        .product-info {
-          display: flex;
-          justify-content: space-between;
-          align-items: flex-start;
-          gap: 1mm;
-        }
-        
-        .product-name {
-          font-size: 5pt;
-          font-weight: bold;
-          flex: 1;
-          line-height: 1.1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          display: -webkit-box;
-          -webkit-line-clamp: 2;
-          -webkit-box-orient: vertical;
-        }
-        
-        .product-code {
-          font-size: 4pt;
-          color: #666;
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-        
-        .barcode-container {
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          flex: 1;
-        }
-        
-        .barcode {
-          width: 33mm;
-          height: 8mm;
-        }
-        
-        .barcode-number {
-          font-size: 4pt;
-          text-align: center;
-          margin-top: 0.5mm;
-        }
-        
-        .price-container {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          border-top: 0.5px solid #ccc;
-          padding-top: 0.5mm;
-          gap: 1mm;
-        }
-        
-        .price-english {
-          font-size: 7pt;
-          font-weight: bold;
-          white-space: nowrap;
-        }
-        
-        .price-arabic {
-          font-size: 6pt;
-          font-weight: bold;
-          direction: rtl;
-          white-space: nowrap;
-        }
-        
-        .controls {
-          position: fixed;
-          top: 10px;
-          right: 10px;
-          background: white;
-          padding: 15px;
-          border-radius: 8px;
-          box-shadow: 0 4px 10px rgba(0,0,0,0.3);
-          z-index: 1000;
-        }
-        
-        .print-button {
-          padding: 10px 20px;
-          background: #4CAF50;
-          color: white;
-          border: none;
-          border-radius: 4px;
-          cursor: pointer;
-          font-size: 16px;
-          font-weight: bold;
-          width: 100%;
-        }
-        
-        @media print {
-          body {
-            background: white;
-            padding: 0;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
+        .company-name { font-size: 4.5pt; font-weight: bold; text-align: center; }
+        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 4pt; }
+        .product-info { display: flex; justify-content: space-between; font-size: 5pt; font-weight: bold; }
+        .barcode { width: 28mm; height: 7mm; }
+        .barcode-number { font-size: 4pt; text-align: center; }
+        .price-container { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
     <body>
-      <div class="controls no-print">
-        <h3 style="margin-bottom: 10px;">TVS LP40 Batch Print</h3>
-        <p><strong>Total stickers:</strong> ${totalStickers}</p>
-        <p><strong>Products:</strong> ${products.length}</p>
-        <p><strong>Copies each:</strong> ${copies}</p>
-        <p><strong>Format:</strong> 38×25mm</p>
-        <button class="print-button" onclick="window.print()">Print All</button>
-      </div>
-      
       ${stickerRows}
-
       <script>
-        console.log("🎯 Batch print loaded - ${totalStickers} stickers");
-        
-        try {
-          ${barcodeScripts}
-          console.log("✅ All barcodes generated successfully");
-        } catch (error) {
-          console.error("❌ Barcode generation error:", error);
-        }
-        
-        setTimeout(() => {
-          window.print();
-        }, 1500);
+        ${barcodeScripts}
+        setTimeout(() => window.print(), 1500);
       </script>
     </body>
     </html>
