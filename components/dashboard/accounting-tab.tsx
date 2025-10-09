@@ -54,6 +54,8 @@ import {
 import { SimpleDateInput } from "@/components/ui/date-picker"
 import { format, startOfWeek, subWeeks, parseISO, isValid } from "date-fns"
 import React from "react"
+import ViewSaleModal from "@/components/sales/view-sale-modal"
+import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
 
 interface AccountingTabProps {
   userId: number
@@ -215,6 +217,18 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const device = useAppSelector(selectDevice)
   const company = useAppSelector(selectCompany)
   const currency = device?.currency || "AED"
+
+  // View modal states
+  const [viewSaleId, setViewSaleId] = useState<number | null>(null)
+  const [viewPurchaseId, setViewPurchaseId] = useState<number | null>(null)
+
+  // Debug logging for transaction structure
+  useEffect(() => {
+    if (financialData?.transactions && financialData.transactions.length > 0) {
+      console.log("Sample transaction structure:", financialData.transactions[0])
+      console.log("All transaction keys:", Object.keys(financialData.transactions[0]))
+    }
+  }, [financialData])
 
   // Debug logging for date issues
   useEffect(() => {
@@ -657,6 +671,14 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       console.error("Error opening print preview:", error)
       toast.error("Failed to open print preview")
     }
+  }
+
+  // Helper function to extract ID from description
+  const extractIdFromDescription = (desc: string) => {
+    if (!desc) return null
+    // Match patterns like "Sale #123" or "Purchase #456"
+    const match = desc.match(/#(\d+)/)
+    return match ? parseInt(match[1]) : null
   }
 
   // Enhanced filtering with income/expense and proper date comparison - using same date-fns approach
@@ -1146,10 +1168,38 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   const netImpact = getNetImpact(transaction)
                   const isPositive = netImpact >= 0
 
+                  // Determine if this is a sale or purchase and extract the correct ID
+                  const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
+                  const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
+                  
+                  const handleClick = () => {
+                    if (isSale) {
+                      // Try multiple ways to get the sale ID
+                      const saleId = transaction.sale_id || 
+                                    transaction.reference_id || 
+                                    extractIdFromDescription(transaction.description) ||
+                                    transaction.id
+                      console.log('Opening sale modal with ID:', saleId, 'Transaction:', transaction)
+                      setViewSaleId(saleId)
+                    } else if (isPurchase) {
+                      // Try multiple ways to get the purchase ID
+                      const purchaseId = transaction.purchase_id || 
+                                        transaction.reference_id || 
+                                        extractIdFromDescription(transaction.description) ||
+                                        transaction.id
+                      console.log('Opening purchase modal with ID:', purchaseId, 'Transaction:', transaction)
+                      setViewPurchaseId(purchaseId)
+                    }
+                  }
+
                   return (
                     <div
                       key={transaction.id}
-                      className="border dark:border-gray-700 rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors"
+                      className="border dark:border-gray-700 rounded-lg p-4 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      onClick={handleClick}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={isSale ? "View Sale" : isPurchase ? "View Purchase" : "View Transaction"}
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1598,6 +1648,22 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* View Sale Modal - Moved outside of TabsContent to avoid unmounting issues */}
+      <ViewSaleModal
+        isOpen={!!viewSaleId}
+        onClose={() => setViewSaleId(null)}
+        saleId={viewSaleId}
+        currency={currency}
+      />
+
+      {/* View Purchase Modal - Moved outside of TabsContent to avoid unmounting issues */}
+      <ViewPurchaseModal
+        isOpen={!!viewPurchaseId}
+        onClose={() => setViewPurchaseId(null)}
+        purchaseId={viewPurchaseId}
+        currency={currency}
+      />
     </div>
   )
 }
