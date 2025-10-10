@@ -51,11 +51,15 @@ import {
   recordManualTransaction,
   getAccountingBalances,
 } from "@/app/actions/simplified-accounting"
+import { deletePurchase } from "@/app/actions/purchase-actions"
+import { deleteSale } from "@/app/actions/sale-actions"
 import { SimpleDateInput } from "@/components/ui/date-picker"
 import { format, startOfWeek, subWeeks, parseISO, isValid } from "date-fns"
 import React from "react"
 import ViewSaleModal from "@/components/sales/view-sale-modal"
 import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
+import EditPurchaseModal from "../purchases/edit-purchase-modal"
+import EditSaleModal from "../sales/edit-sale-modal"
 
 interface AccountingTabProps {
   userId: number
@@ -221,6 +225,14 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // View modal states
   const [viewSaleId, setViewSaleId] = useState<number | null>(null)
   const [viewPurchaseId, setViewPurchaseId] = useState<number | null>(null)
+
+  // Edit modal states
+  const [editSaleId, setEditSaleId] = useState<number | null>(null)
+  const [editPurchaseId, setEditPurchaseId] = useState<number | null>(null)
+
+  // Loading states for delete operations
+  const [deletingSaleId, setDeletingSaleId] = useState<number | null>(null)
+  const [deletingPurchaseId, setDeletingPurchaseId] = useState<number | null>(null)
 
   // Debug logging for transaction structure
   useEffect(() => {
@@ -527,6 +539,105 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     } finally {
       setIsAddingManual(false)
     }
+  }
+
+  // Enhanced sale handlers for ViewSaleModal
+  const handleEditSale = (saleId: number) => {
+    console.log("Opening edit sale modal for:", saleId)
+    setViewSaleId(null) // Close view modal
+    setEditSaleId(saleId) // Open edit modal
+  }
+
+  const handleDeleteSale = async (saleId: number) => {
+    if (!confirm("Are you sure you want to delete this sale? This action cannot be undone and will affect your financial records.")) {
+      return
+    }
+
+    try {
+      setDeletingSaleId(saleId)
+      console.log(`Deleting sale ${saleId}...`)
+      
+      const response = await deleteSale(saleId, deviceId)
+      
+      if (response.success) {
+        toast.success(response.message || "Sale deleted successfully")
+        
+        // Refresh financial data to reflect the changes
+        loadFinancialData(false)
+        
+        // Also refresh balances
+        loadAccountingBalances(dateFrom, dateTo)
+        
+        // Close the modal
+        setViewSaleId(null)
+        
+        console.log(`Sale ${saleId} deleted successfully`)
+      } else {
+        throw new Error(response.message || "Failed to delete sale")
+      }
+    } catch (error) {
+      console.error("Error deleting sale:", error)
+      toast.error(error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
+    } finally {
+      setDeletingSaleId(null)
+    }
+  }
+
+  // Enhanced purchase handlers for ViewPurchaseModal
+  const handleEditPurchase = (purchaseId: number) => {
+    console.log("Opening edit purchase modal for:", purchaseId)
+    setViewPurchaseId(null) // Close view modal
+    setEditPurchaseId(purchaseId) // Open edit modal
+  }
+
+  const handleDeletePurchase = async (purchaseId: number) => {
+    if (!confirm("Are you sure you want to delete this purchase? This action cannot be undone and will affect your financial records.")) {
+      return
+    }
+
+    try {
+      setDeletingPurchaseId(purchaseId)
+      console.log(`Deleting purchase ${purchaseId}...`)
+      
+      const response = await deletePurchase(purchaseId, deviceId)
+      
+      if (response.success) {
+        toast.success(response.message || "Purchase deleted successfully")
+        
+        // Refresh financial data to reflect the changes
+        loadFinancialData(false)
+        
+        // Also refresh balances
+        loadAccountingBalances(dateFrom, dateTo)
+        
+        // Close the modal
+        setViewPurchaseId(null)
+        
+        console.log(`Purchase ${purchaseId} deleted successfully`)
+      } else {
+        throw new Error(response.message || "Failed to delete purchase")
+      }
+    } catch (error) {
+      console.error("Error deleting purchase:", error)
+      toast.error(error instanceof Error ? error.message : "An unexpected error occurred. Please try again later.")
+    } finally {
+      setDeletingPurchaseId(null)
+    }
+  }
+
+  // Handle successful edits
+  const handleSaleUpdated = () => {
+    setEditSaleId(null)
+    loadFinancialData(false)
+    loadAccountingBalances(dateFrom, dateTo)
+    toast.success("Sale updated successfully")
+  }
+
+  const handlePurchaseUpdated = () => {
+    setEditPurchaseId(null)
+    loadFinancialData(false)
+    loadAccountingBalances(dateFrom, dateTo)
+    toast.success("Purchase updated successfully")
   }
 
   const handlePrintReport = () => {
@@ -1649,21 +1760,50 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         </DialogContent>
       </Dialog>
 
-      {/* View Sale Modal - Moved outside of TabsContent to avoid unmounting issues */}
+      {/* View Sale Modal */}
       <ViewSaleModal
         isOpen={!!viewSaleId}
         onClose={() => setViewSaleId(null)}
         saleId={viewSaleId}
         currency={currency}
+        onEdit={handleEditSale}
+        onDelete={handleDeleteSale}
+        isDeleting={deletingSaleId === viewSaleId}
       />
 
-      {/* View Purchase Modal - Moved outside of TabsContent to avoid unmounting issues */}
+      {/* View Purchase Modal */}
       <ViewPurchaseModal
         isOpen={!!viewPurchaseId}
         onClose={() => setViewPurchaseId(null)}
         purchaseId={viewPurchaseId}
         currency={currency}
+        onEdit={handleEditPurchase}
+        onDelete={handleDeletePurchase}
+        isDeleting={deletingPurchaseId === viewPurchaseId}
+      />
+
+      {/* Edit Sale Modal */}
+      <EditSaleModal
+        isOpen={!!editSaleId}
+        onClose={() => setEditSaleId(null)}
+        saleId={editSaleId}
+        userId={userId}
+        deviceId={deviceId}
+        currency={currency}
+        onSaleUpdated={handleSaleUpdated}
+      />
+
+      {/* Edit Purchase Modal */}
+      <EditPurchaseModal
+        isOpen={!!editPurchaseId}
+        onClose={() => setEditPurchaseId(null)}
+        purchaseId={editPurchaseId}
+        userId={userId}
+        deviceId={deviceId}
+        currency={currency}
+        onPurchaseUpdated={handlePurchaseUpdated}
       />
     </div>
   )
 }
+
