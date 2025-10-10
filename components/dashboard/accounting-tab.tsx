@@ -60,7 +60,8 @@ import ViewSaleModal from "@/components/sales/view-sale-modal"
 import ViewPurchaseModal from "@/components/purchases/view-purchase-modal"
 import EditPurchaseModal from "../purchases/edit-purchase-modal"
 import EditSaleModal from "../sales/edit-sale-modal"
-
+import ViewManualTransactionModal from "../manual/ViewManualTransactionModal"
+import EditManualTransactionModal from "../manual/EditManualTransactionModal"
 interface AccountingTabProps {
   userId: number
   companyId: number
@@ -233,6 +234,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Loading states for delete operations
   const [deletingSaleId, setDeletingSaleId] = useState<number | null>(null)
   const [deletingPurchaseId, setDeletingPurchaseId] = useState<number | null>(null)
+
+  // New states for viewing and editing manual transactions
+  const [viewManualTransactionId, setViewManualTransactionId] = useState<number | null>(null)
+  const [editManualTransactionId, setEditManualTransactionId] = useState<number | null>(null)
 
   // Debug logging for transaction structure
   useEffect(() => {
@@ -1282,7 +1287,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   // Determine if this is a sale or purchase and extract the correct ID
                   const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
                   const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
-                  
+                  const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
                   const handleClick = () => {
                     if (isSale) {
                       // Try multiple ways to get the sale ID
@@ -1300,6 +1305,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                                         transaction.id
                       console.log('Opening purchase modal with ID:', purchaseId, 'Transaction:', transaction)
                       setViewPurchaseId(purchaseId)
+                    } else if (isManual) {
+                      setViewManualTransactionId(transaction.id)
                     }
                   }
 
@@ -1771,6 +1778,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         isDeleting={deletingSaleId === viewSaleId}
       />
 
+
+
       {/* View Purchase Modal */}
       <ViewPurchaseModal
         isOpen={!!viewPurchaseId}
@@ -1803,7 +1812,42 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         currency={currency}
         onPurchaseUpdated={handlePurchaseUpdated}
       />
+
+      {/* View Manual Transaction Modal */}
+      {/* View Manual Transaction Modal */}
+<ViewManualTransactionModal
+  isOpen={!!viewManualTransactionId}
+  onClose={() => setViewManualTransactionId(null)}
+  transactionId={viewManualTransactionId}
+  currency={currency}
+  deviceId={deviceId} // Add this line
+  onEdit={(id) => {
+    setViewManualTransactionId(null)
+    setEditManualTransactionId(id)
+  }}
+  onTransactionDeleted={() => {
+    // Refresh data after deletion
+    loadFinancialData(false)
+    loadAccountingBalances(dateFrom, dateTo)
+    toast.success("Manual transaction deleted successfully")
+  }}
+/>
+
+
+      {/* Edit Manual Transaction Modal */}
+      <EditManualTransactionModal
+        isOpen={!!editManualTransactionId}
+        onClose={() => setEditManualTransactionId(null)}
+        transactionId={editManualTransactionId}
+        currency={currency}
+        onTransactionUpdated={() => {
+          setEditManualTransactionId(null)
+          // reload financial data if needed
+          loadFinancialData(false)
+        }}
+      />
     </div>
   )
 }
+
 

@@ -1418,10 +1418,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const [currentPage, setCurrentPage] = useState(1)
   const salesPerPage = 7
   const totalPages = Math.ceil(filteredSales.length / salesPerPage)
-  const paginatedSales = filteredSales.slice(
-    (currentPage - 1) * salesPerPage,
-    currentPage * salesPerPage
-  )
+  const paginatedSales = filteredSales.slice((currentPage - 1) * salesPerPage, currentPage * salesPerPage)
 
   const [autoPrint, setAutoPrint] = useState(() => {
     const saved = localStorage.getItem("autoPrintReceipt")
@@ -1435,7 +1432,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
       {/* Mobile-first layout that wraps on smaller screens */}
       <div className="flex flex-col xl:flex-row gap-3 h-full">
-        
         {/* Main Sale Form Section */}
         <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
           {/* Add Sale Form */}
@@ -1465,7 +1461,11 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
               {/* Alerts */}
               {(formAlert || barcodeAlert) && (
-                <div className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                <div
+                  className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+                  role="status"
+                  aria-live="polite"
+                >
                   {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
                   {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
                 </div>
@@ -1473,7 +1473,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
 
               {/* Responsive layout for products and sale details */}
               <div className="flex flex-col lg:flex-row h-full">
-                
                 {/* Products section */}
                 <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
                   {/* Barcode scanner */}
@@ -1482,6 +1481,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                       <div className="relative flex-1">
                         <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
                         <Input
+                          aria-label="Scan barcode or search product"
+                          autoComplete="off"
+                          spellCheck={false}
                           placeholder="Scan barcode or search product..."
                           className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
                             scanStatus === "processing"
@@ -1547,7 +1549,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                         onClick={() => setIsNewServiceModalOpen(true)}
                         className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
                       >
-                        <Wrench className="h-3 w-3" /> 
+                        <Wrench className="h-3 w-3" />
                         <span className="hidden sm:inline">Service</span>
                       </Button>
                       <Button
@@ -1557,7 +1559,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                         onClick={() => setIsNewProductModalOpen(true)}
                         className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
                       >
-                        <Plus className="h-3 w-3" /> 
+                        <Plus className="h-3 w-3" />
                         <span className="hidden sm:inline">Product</span>
                       </Button>
                       <Button
@@ -1567,7 +1569,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                         onClick={addProductRow}
                         className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
                       >
-                        <Plus className="h-3 w-3" /> 
+                        <Plus className="h-3 w-3" />
                         <span className="hidden sm:inline">Row</span>
                       </Button>
                     </div>
@@ -2001,7 +2003,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                             </div>
                             <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
                               <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
-                              <Label htmlFor="online" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                              <Label
+                                htmlFor="online"
+                                className="cursor-pointer text-xs text-gray-900 dark:text-gray-200"
+                              >
                                 Online
                               </Label>
                             </div>
@@ -2062,6 +2067,23 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                           </span>
                         )}
                       </Button>
+
+                      <div className="mt-2 flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1">
+                        <label htmlFor="auto-print" className="text-xs text-gray-700 dark:text-gray-300">
+                          Auto‑print receipt
+                        </label>
+                        <input
+                          id="auto-print"
+                          type="checkbox"
+                          checked={autoPrint}
+                          onChange={(e) => {
+                            setAutoPrint(e.target.checked)
+                            localStorage.setItem("autoPrintReceipt", e.target.checked ? "true" : "false")
+                          }}
+                          className="h-4 w-4 accent-blue-600"
+                          aria-label="Toggle auto-print receipt"
+                        />
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2151,7 +2173,8 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
             <Card className="bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700">
               <CardContent className="p-2">
                 <div className="text-center">
-                  <div className="text-sm font-bold text-purple-600 dark:text-purple-400">
+                  {/* remove purple accent; neutralize COGS number to improve palette consistency */}
+                  <div className="text-sm font-bold text-gray-700 dark:text-gray-300">
                     {privacyMode
                       ? getPrivacyValue()
                       : formatCurrency(
@@ -2197,6 +2220,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 <div className="relative">
                   <Search className="absolute left-2.5 top-2.5 h-3 w-3 text-gray-400" />
                   <Input
+                    aria-label="Search sales"
                     type="search"
                     placeholder="Search sales..."
                     className="pl-7 h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400"
@@ -2231,7 +2255,9 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                     >
                       <Filter className="h-3 w-3 mr-1" />
                       <span className="hidden sm:inline xl:inline">
-                        {statusFilter === "all" ? "All" : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
+                        {statusFilter === "all"
+                          ? "All"
+                          : statusFilter?.charAt(0).toUpperCase() + statusFilter?.slice(1)}
                       </span>
                     </Button>
                   </div>
@@ -2256,7 +2282,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                       size="sm"
                       className={`flex-1 text-xs h-6 hover:bg-gray-50 dark:hover:bg-gray-700 bg-transparent ${
                         isCustomDateRangeActive()
-                          ? "border-purple-500 dark:border-purple-400 bg-purple-50 dark:bg-purple-900/20 text-purple-600 dark:text-purple-400"
+                          ? "border-blue-500 dark:border-blue-400 bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300"
                           : "border-gray-300 dark:border-gray-600"
                       }`}
                     >
@@ -2330,35 +2356,44 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                     ))}
                     {/* Pagination controls */}
                     {totalPages > 1 && (
-                      <div className="flex justify-center mt-4 gap-2">
-                        <button
-                          className="w-8 h-8 rounded bg-white border border-gray-300 text-black hover:bg-gray-100 transition"
+                      <nav aria-label="Sales pagination" className="flex justify-center mt-4 gap-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label="Previous page"
+                          className="h-8 w-8 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
                           disabled={currentPage === 1}
                           onClick={() => setCurrentPage(currentPage - 1)}
                         >
-                          &lt;
-                        </button>
+                          {"<"}
+                        </Button>
                         {Array.from({ length: totalPages }).map((_, i) => (
-                          <button
+                          <Button
                             key={i}
-                            className={`w-8 h-8 rounded border text-black font-semibold transition
-                              ${currentPage === i + 1
-                                ? "bg-red-600 text-white border-red-600"
-                                : "bg-white border-gray-300 hover:bg-gray-100"
-                              }`}
+                            variant={currentPage === i + 1 ? "default" : "outline"}
+                            size="sm"
+                            aria-label={`Go to page ${i + 1}`}
+                            className={`h-8 w-8 ${
+                              currentPage === i + 1
+                                ? "bg-blue-600 hover:bg-blue-700 text-white border-blue-600"
+                                : "bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
+                            }`}
                             onClick={() => setCurrentPage(i + 1)}
                           >
                             {i + 1}
-                          </button>
+                          </Button>
                         ))}
-                        <button
-                          className="w-8 h-8 rounded bg-white border border-gray-300 text-black hover:bg-gray-100 transition"
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          aria-label="Next page"
+                          className="h-8 w-8 bg-white dark:bg-gray-800 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 hover:bg-gray-100 dark:hover:bg-gray-700"
                           disabled={currentPage === totalPages}
                           onClick={() => setCurrentPage(currentPage + 1)}
                         >
-                          &gt;
-                        </button>
-                      </div>
+                          {">"}
+                        </Button>
+                      </nav>
                     )}
                   </div>
                 )}
@@ -2468,7 +2503,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
               <div className="text-sm text-gray-700 dark:text-gray-300">
                 Sale completed successfully. Would you like to print the receipt?
               </div>
-              <div className="flex gap-2 justify-end">
+              <div className="flex justify-end gap-2">
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -2505,7 +2540,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                   type="checkbox"
                   id="remember-choice"
                   checked={rememberChoice}
-                  onChange={e => setRememberChoice(e.target.checked)}
+                  onChange={(e) => setRememberChoice(e.target.checked)}
                   className="mr-2"
                 />
                 <Label htmlFor="remember-choice" className="text-xs text-gray-700 dark:text-gray-300">
@@ -2519,5 +2554,4 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     </div>
   )
 }
-
 

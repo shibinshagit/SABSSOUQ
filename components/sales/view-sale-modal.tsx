@@ -184,7 +184,7 @@ export default function ViewSaleModal({
   // Handle action buttons
   const handleEdit = () => {
     if (onEdit && saleData) {
-      onEdit(saleData)
+      onEdit(saleData.id)
       // Don't close here - let the parent handle the modal transition
       // onClose() // Remove this line
     }
