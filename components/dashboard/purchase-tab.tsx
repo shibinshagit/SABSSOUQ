@@ -10,6 +10,7 @@ import { deletePurchase } from "@/app/actions/purchase-actions"
 import NewPurchaseModal from "../purchases/new-purchase-modal"
 import ViewPurchaseModal from "../purchases/view-purchase-modal"
 import EditPurchaseModal from "../purchases/edit-purchase-modal"
+import SupplierTab from "./supplier-tab"
 import { Input } from "@/components/ui/input"
 import { PdfExportButton } from "@/components/ui/pdf-export-button"
 import { useSelector, useDispatch } from "react-redux"
@@ -106,6 +107,8 @@ export default function PurchaseTab({
   const isInitializedRef = useRef(false)
   const isLoadingRef = useRef(false)
   const lastFetchRef = useRef<number>(0)
+
+  const [isSuppliersViewOpen, setIsSuppliersViewOpen] = useState(false)
 
   // Debounced search effect
   useEffect(() => {
@@ -891,6 +894,18 @@ export default function PurchaseTab({
               </div>
             </div>
 
+            <Button
+                onClick={() => setIsSuppliersViewOpen(true)}
+                variant="outline"
+                size="sm"
+                className="flex items-center gap-2 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800 hover:bg-blue-50 dark:hover:bg-blue-900/20 text-xs sm:text-sm whitespace-nowrap"
+              >
+                <Truck className="h-4 w-4 flex-shrink-0" />
+                <span className="hidden sm:inline">View Suppliers</span>
+                <span className="sm:hidden">Suppliers</span>
+              </Button>
+
+
             {/* Filter Buttons - Mobile Responsive Grid */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:flex lg:flex-wrap gap-2 mb-4">
               {/* Date Filters */}
@@ -1383,6 +1398,28 @@ export default function PurchaseTab({
         </div>
       )}
 
+      {isSuppliersViewOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-2">
+          <div className="bg-white dark:bg-gray-900 rounded-2xl w-full max-w-5xl h-[90vh] overflow-hidden shadow-2xl relative animate-in fade-in-50 zoom-in-90">
+            {/* Close button */}
+            <Button
+              size="icon"
+              onClick={() => setIsSuppliersViewOpen(false)}
+              className="absolute top-16 right-1/2  z-14"
+            >
+              <X className="h-5 w-5" />
+            </Button>
+
+            {/* SupplierTab Component */}
+            <SupplierTab
+              userId={userId}
+              onModalClose={() => setIsSuppliersViewOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
+
       {/* Amount Filter Modal */}
       {isAmountFilterModalOpen && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
@@ -1429,6 +1466,9 @@ export default function PurchaseTab({
                     step="0.01"
                   />
                 </div>
+
+
+
 
                 <div className="flex flex-col sm:flex-row gap-2 pt-4">
                   <Button onClick={handleAmountFilterApply} className="flex-1">
