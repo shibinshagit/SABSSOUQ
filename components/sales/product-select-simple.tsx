@@ -28,7 +28,7 @@ interface ProductSelectSimpleProps {
 
 // Helper: truncate names
 const truncateName = (name: string) => {
-  if (name.length > 20) return name.substring(0, 17) + "..."
+  if (name.length > 30) return name.substring(0, 27) + "..."
   return name
 }
 
@@ -102,24 +102,26 @@ export default function ProductSelectSimple({
     }
   }, [refreshTrigger, onRefreshComplete, allowServices, debouncedSearchTerm, isServiceMode])
 
-  // Handle selected product
+  // Handle selected product - FIXED: Added proper dependency and cleanup
   useEffect(() => {
-    if (value && !selectedProduct) {
+    if (value) {
       if (isServiceMode) {
         const service = services.find((s) => s.id === value)
-        setSelectedProduct(service || null)
+        if (service && (!selectedProduct || selectedProduct.id !== value)) {
+          setSelectedProduct(service)
+        }
       } else {
         const product = products.find((p) => p.id === value)
-        if (product) {
+        if (product && (!selectedProduct || selectedProduct.id !== value)) {
           setSelectedProduct(product)
-        } else if (!hasSearched) {
+        } else if (!hasSearched && (!selectedProduct || selectedProduct.id !== value)) {
           fetchSelectedProduct(value)
         }
       }
     } else {
       setSelectedProduct(null)
     }
-  }, [value, products, services, isServiceMode, hasSearched])
+  }, [value, products, services, isServiceMode, hasSearched, selectedProduct])
 
   // Search products with normalization
   const searchProducts = async (searchTerm: string) => {
@@ -170,7 +172,12 @@ export default function ProductSelectSimple({
     try {
       const result = await getProducts(userId, 1, productId.toString())
       if (result.success && result.data.length > 0) {
-        setSelectedProduct(result.data[0])
+        const product = result.data[0]
+        setSelectedProduct(product)
+        
+        // Also update the parent with the correct product details
+        const finalPrice = usePriceType === "wholesale" && product.wholesale_price ? product.wholesale_price : product.price
+        onChange(product.id, product.name, finalPrice, product.wholesale_price, product.stock)
       }
     } catch (error) {
       console.error("Error fetching selected product:", error)
@@ -209,13 +216,21 @@ export default function ProductSelectSimple({
     wholesalePrice?: number,
     stock?: number
   ) => {
-    setSelectedProduct({
-      id: itemId,
-      name: itemName,
-      price,
-      wholesale_price: wholesalePrice,
-      stock,
-    })
+    const selectedItem = items.find(item => item.id === itemId)
+    
+    // Use the actual item data from the list to ensure consistency
+    if (selectedItem) {
+      setSelectedProduct(selectedItem)
+    } else {
+      // Fallback to the passed data
+      setSelectedProduct({
+        id: itemId,
+        name: itemName,
+        price,
+        wholesale_price: wholesalePrice,
+        stock,
+      })
+    }
 
     if (isServiceMode) {
       onChange(itemId, itemName, price, 0, 999)
@@ -228,7 +243,14 @@ export default function ProductSelectSimple({
     setLocalSearchTerm("")
   }
 
-  const handleDialogOpen = () => setOpen(true)
+  const handleDialogOpen = () => {
+    setOpen(true)
+    // Reset search when opening dialog to show recent products
+    if (!isServiceMode && !localSearchTerm) {
+      searchProducts("")
+    }
+  }
+
   const handleDialogClose = () => {
     setOpen(false)
     setLocalSearchTerm("")
@@ -247,6 +269,7 @@ export default function ProductSelectSimple({
     setLocalSearchTerm("")
     setProducts([])
     setHasSearched(false)
+    setSelectedProduct(null) // Clear selection when switching modes
   }
 
   return (
@@ -260,24 +283,26 @@ export default function ProductSelectSimple({
         type="button"
         onClick={handleDialogOpen}
       >
-        <div className="flex items-center">
+        <div className="flex items-center min-w-0 flex-1">
           {selectedProduct ? (
             <>
               {isServiceMode || (selectedProduct && "category" in selectedProduct) ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
+                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
               ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
               )}
-              <span className="truncate">{truncateName(selectedProduct.name)}</span>
+              <span className="truncate" title={selectedProduct.name}>
+                {truncateName(selectedProduct.name)}
+              </span>
             </>
           ) : (
             <>
               {isServiceMode ? (
-                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400" />
+                <Wrench className="mr-2 h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
               ) : (
-                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400" />
+                <Package className="mr-2 h-4 w-4 text-blue-600 dark:text-blue-400 flex-shrink-0" />
               )}
-              <span>Select {isServiceMode ? "service" : "product"}...</span>
+              <span className="truncate">Select {isServiceMode ? "service" : "product"}...</span>
             </>
           )}
         </div>
@@ -348,7 +373,7 @@ export default function ProductSelectSimple({
                   Searching {isServiceMode ? "services" : "products"}...
                 </p>
               </div>
-            ) : !hasSearched && !isServiceMode ? (
+            ) : !hasSearched && !isServiceMode && localSearchTerm.trim() === "" ? (
               <div className="p-4 text-center">
                 <Search className="h-8 w-8 mx-auto text-gray-400 mb-2" />
                 <p className="text-sm text-gray-500 dark:text-gray-400">Start typing to search products...</p>
@@ -370,7 +395,10 @@ export default function ProductSelectSimple({
                     <button
                       key={item.id}
                       type="button"
-                      className="relative flex w-full cursor-pointer select-none items-center rounded-md px-3 py-2 text-sm outline-none hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-gray-900 dark:text-gray-100 font-normal"
+                      className={cn(
+                        "relative flex w-full cursor-pointer select-none items-center rounded-md px-3 py-2 text-sm outline-none hover:bg-gray-100 dark:hover:bg-gray-700 text-left text-gray-900 dark:text-gray-100 font-normal",
+                        value === item.id && "bg-blue-50 dark:bg-blue-900/20"
+                      )}
                       onClick={() =>
                         handleItemSelect(
                           item.id,
@@ -392,8 +420,8 @@ export default function ProductSelectSimple({
                           <span className="text-gray-900 dark:text-gray-100 truncate" title={item.name}>
                             {item.name}
                           </span>
-                          <span className="text-xs text-gray-500 dark:text-gray-400">
-                            {!isServiceMode && item.wholesale_price > 0 && ` • Company: ${item.company_name} `}
+                          <span className="text-xs text-gray-500 dark:text-gray-400 truncate">
+                            {!isServiceMode && item.company_name && `Company: ${item.company_name} • `}
                             Price: {item.price}
                             {!isServiceMode && item.wholesale_price > 0 && ` • Wholesale: ${item.wholesale_price}`}
                             {!isServiceMode && item.barcode && ` • Barcode: ${item.barcode}`}
@@ -424,4 +452,3 @@ export default function ProductSelectSimple({
     </div>
   )
 }
-
