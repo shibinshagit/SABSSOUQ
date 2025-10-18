@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { useSelector } from "react-redux"
 import { selectDeviceId } from "@/store/slices/deviceSlice"
+import type { RootState } from "@/store/store"
 
 interface ProductSelectSimpleProps {
   id?: string
@@ -62,6 +63,9 @@ export default function ProductSelectSimple({
   searchBufferSize = 50,
 }: ProductSelectSimpleProps) {
   const deviceId = useSelector(selectDeviceId)
+  // Get products from Redux store
+  const reduxProducts = useSelector((state: RootState) => state.products.products)
+  
   const [open, setOpen] = useState(false)
   const [services, setServices] = useState<any[]>([])
   const [products, setProducts] = useState<any[]>([])
@@ -102,24 +106,52 @@ export default function ProductSelectSimple({
     }
   }, [refreshTrigger, onRefreshComplete, allowServices, debouncedSearchTerm, isServiceMode])
 
-  // Handle selected product
+  // CRITICAL FIX: Handle selected product with Redux integration
   useEffect(() => {
-    if (value && !selectedProduct) {
-      if (isServiceMode) {
-        const service = services.find((s) => s.id === value)
-        setSelectedProduct(service || null)
-      } else {
-        const product = products.find((p) => p.id === value)
-        if (product) {
-          setSelectedProduct(product)
-        } else if (!hasSearched) {
-          fetchSelectedProduct(value)
-        }
-      }
-    } else {
+    if (!value) {
       setSelectedProduct(null)
+      return
     }
-  }, [value, products, services, isServiceMode, hasSearched])
+
+    if (isServiceMode) {
+      const service = services.find((s) => s.id === value)
+      setSelectedProduct(service || null)
+      return
+    }
+
+    // First, try to find in Redux store (for newly added products)
+    const reduxProduct = reduxProducts.find((p) => {
+      return String(p.id) === String(value) || Number(p.id) === value
+    })
+
+    if (reduxProduct) {
+      console.log('Found product in Redux store:', reduxProduct)
+      setSelectedProduct({
+        id: reduxProduct.id,
+        name: reduxProduct.name,
+        price: reduxProduct.price,
+        wholesale_price: reduxProduct.wholesale_price,
+        stock: reduxProduct.stock,
+        barcode: reduxProduct.barcode,
+        company_name: reduxProduct.company_name,
+      })
+      return
+    }
+
+    // Then try to find in local products array
+    const localProduct = products.find((p) => p.id === value)
+    if (localProduct) {
+      console.log('Found product in local products:', localProduct)
+      setSelectedProduct(localProduct)
+      return
+    }
+
+    // Finally, fetch from backend if not found anywhere
+    if (!hasSearched || !selectedProduct || selectedProduct.id !== value) {
+      console.log('Fetching product from backend:', value)
+      fetchSelectedProduct(value)
+    }
+  }, [value, products, services, isServiceMode, hasSearched, reduxProducts])
 
   // Search products with normalization
   const searchProducts = async (searchTerm: string) => {
@@ -170,6 +202,7 @@ export default function ProductSelectSimple({
     try {
       const result = await getProducts(userId, 1, productId.toString())
       if (result.success && result.data.length > 0) {
+        console.log('Fetched product from backend:', result.data[0])
         setSelectedProduct(result.data[0])
       }
     } catch (error) {
@@ -209,13 +242,15 @@ export default function ProductSelectSimple({
     wholesalePrice?: number,
     stock?: number
   ) => {
-    setSelectedProduct({
+    const newSelectedProduct = {
       id: itemId,
       name: itemName,
       price,
       wholesale_price: wholesalePrice,
       stock,
-    })
+    }
+    
+    setSelectedProduct(newSelectedProduct)
 
     if (isServiceMode) {
       onChange(itemId, itemName, price, 0, 999)
@@ -424,4 +459,3 @@ export default function ProductSelectSimple({
     </div>
   )
 }
-
