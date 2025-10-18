@@ -223,9 +223,19 @@ export default function NewPurchaseModal({
   }
 
   // Handle new product added
+// Handle new product added
   const handleNewProduct = (product: any) => {
+    // Ensure product has a valid numeric id (convert string to number if needed)
+    const productId = typeof product.id === 'string' ? parseInt(product.id, 10) : product.id
+
+    // Create a normalized product object with consistent id type
+    const normalizedProduct = {
+      ...product,
+      id: productId,
+    }
+
     // First, add the product to Redux store
-    dispatch(addProduct(product))
+    dispatch(addProduct(normalizedProduct))
 
     // Show success notification
     showNotification("success", `Product "${product.name}" added successfully`)
@@ -236,22 +246,23 @@ export default function NewPurchaseModal({
     // Use wholesale price if available, otherwise use retail price
     const priceToUse = product.wholesale_price || product.price
 
-    // Update the target row with the new product
-    updateProductRow(targetRowId, {
-      productId: product.id,
-      productName: product.name,
-      price: priceToUse,
-      wholesalePrice: product.wholesale_price,
-      total: (products.find((p) => p.id === targetRowId)?.quantity || 1) * priceToUse,
-    })
-
-    // Close the modal
+    // Close the modal first to allow ProductSelectSimple to re-render with new data
     setIsNewProductModalOpen(false)
-
-    // Reset active row
     setActiveProductRowId(null)
-  }
 
+    // Use setTimeout to ensure Redux state is updated before updating the product row
+    setTimeout(() => {
+      // Update the target row with the new product
+      updateProductRow(targetRowId, {
+        productId: productId,
+        productName: product.name,
+        price: priceToUse,
+        wholesalePrice: product.wholesale_price,
+        total: (products.find((p) => p.id === targetRowId)?.quantity || 1) * priceToUse,
+      })
+    }, 100)
+  }
+  
   // Handle form submission
   const handleSubmit = async () => {
     setFormAlert(null) // Clear any previous alerts
