@@ -1,11 +1,5 @@
 "use client"
 
-// Helper function to convert English numerals to Arabic numerals
-export function toArabicNumerals(str: string): string {
-  const arabicNumerals = ["٠", "١", "٢", "٣", "٤", "٥", "٦", "٧", "٨", "٩"]
-  return str.replace(/[0-9]/g, (match) => arabicNumerals[Number.parseInt(match)])
-}
-
 // Generate a valid EAN-13 barcode with proper check digit
 export function generateEAN13(): string {
   let code = "200"
@@ -55,7 +49,6 @@ export function printBarcodeSticker(product: any, currency = "AED") {
 
   const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
   const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
-  const arabicPrice = toArabicNumerals(price)
 
   let barcodeValue = product.barcode || ""
   if (!barcodeValue || !validateEAN13(barcodeValue)) {
@@ -88,13 +81,15 @@ export function printBarcodeSticker(product: any, currency = "AED") {
         .print-button { padding: 12px 20px; background: #4CAF50; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; font-weight: bold; width: 100%; margin-top: 10px; }
         .print-button:hover { background: #45a049; }
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
-        .sticker { width: 32mm; height: 22mm; border: 1px solid #000; border-radius: 2mm; padding: 1mm; display: flex; flex-direction: column; justify-content: space-between; background: white; position: relative; }
-        .company-name { font-size: 4.5pt; font-weight: bold; text-align: center; }
-        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 4pt; font-weight: bold; }
-        .product-info { display: flex; justify-content: space-between; font-size: 5pt; font-weight: bold; }
-        .barcode { width: 28mm; height: 7mm; }
-        .barcode-number { font-size: 4pt; text-align: center; }
-        .price-container { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; }
+        .sticker { width: 32mm; height: 22mm; border: 1px solid #000; border-radius: 2mm; padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column; justify-content: space-between; background: white; position: relative; }
+        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; }
+        .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; font-weight: bold; }
+        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .barcode { width: 31mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
+        .barcode svg { width: 100% !important; height: 100% !important; max-width: 31mm !important; }
+        .barcode svg { width: 100% !important; height: 100% !important; }
+        .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
         @media print { body { background: white; padding: 0; } .no-print { display: none !important; } }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
@@ -125,8 +120,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           productCode: "${productCode}",
           barcodeValue: "${barcodeValue}",
           currency: "${currency}",
-          price: "${price}",
-          arabicPrice: "${arabicPrice}"
+          price: "${price}"
         };
         
         function updateQuantity(change) {
@@ -158,10 +152,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
               '</div>' +
               '<svg class="barcode" id="barcode' + i + '"></svg>' +
               '<div class="barcode-number">' + productData.barcodeValue + '</div>' +
-              '<div class="price-container">' +
-                '<span>' + productData.currency + ' ' + productData.price + '</span>' +
-                '<span>' + productData.arabicPrice + ' ' + productData.currency + '</span>' +
-              '</div>' +
+              '<div class="price-container">' + productData.currency + ' ' + productData.price + '</div>' +
             '</div>';
             
             if (i % 2 === 1 || i === currentQuantity - 1) html += '</div>';
@@ -171,7 +162,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
           
           for (let i = 0; i < currentQuantity; i++) {
             JsBarcode("#barcode" + i, productData.barcodeValue, {
-              format: "EAN13", width: 1, height: 30, displayValue: false, margin: 0
+              format: "EAN13", width: 2.8, height: 50, displayValue: false, margin: 0, flat: true
             });
           }
         }
@@ -204,7 +195,6 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
   products.forEach((product) => {
     const productCode = product.id ? product.id.toString().padStart(4, "0") : "0000"
     const price = typeof product.price === "number" ? product.price.toFixed(2) : (Number.parseFloat(product.price || "0") || 0).toFixed(2)
-    const arabicPrice = toArabicNumerals(price)
 
     let barcodeValue = product.barcode || ""
     if (!barcodeValue || !validateEAN13(barcodeValue)) {
@@ -233,10 +223,7 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           </div>
           <svg class="barcode" id="${barcodeId}"></svg>
           <div class="barcode-number">${barcodeValue}</div>
-          <div class="price-container">
-            <span>${currency} ${price}</span>
-            <span>${arabicPrice} ${currency}</span>
-          </div>
+          <div class="price-container">${currency} ${price}</div>
         </div>
       `
 
@@ -247,10 +234,11 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
       barcodeScripts += `
         JsBarcode("#${barcodeId}", "${barcodeValue}", {
           format: "EAN13",
-          width: 1,
-          height: 30,
+          width: 2.8,
+          height: 50,
           displayValue: false,
-          margin: 0
+          margin: 0,
+          flat: true
         });
       `
     }
@@ -272,16 +260,16 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
         .sticker {
           width: 32mm; height: 22mm;
           border: 1px solid #000; border-radius: 2mm;
-          padding: 1mm; display: flex; flex-direction: column;
-          justify-content: space-between; background: white;
+          padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column;
+          justify-space-between; background: white;
           position: relative;
         }
-        .company-name { font-size: 4.5pt; font-weight: bold; text-align: center; }
-        .encoded-price { position: absolute; top: 1mm; right: 1mm; font-size: 4pt; }
-        .product-info { display: flex; justify-content: space-between; font-size: 5pt; font-weight: bold; }
-        .barcode { width: 28mm; height: 7mm; }
-        .barcode-number { font-size: 4pt; text-align: center; }
-        .price-container { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; }
+        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; }
+        .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; }
+        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .barcode { width: 31mm; height: 10mm; display: block; }
+        .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
+        .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
       </style>
       <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
     </head>
