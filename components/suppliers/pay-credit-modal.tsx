@@ -23,6 +23,7 @@ import {
   Banknote,
   TrendingDown,
   FileText,
+  CalendarIcon,
 } from "lucide-react"
 import { paySupplierCredit } from "@/app/actions/supplier-payment-actions"
 import { useSelector } from "react-redux"
@@ -59,6 +60,7 @@ export default function PayCreditModal({
   const [paymentAmount, setPaymentAmount] = useState("")
   const [paymentMethod, setPaymentMethod] = useState("Cash")
   const [notes, setNotes] = useState("")
+  const [paymentDate, setPaymentDate] = useState<string>("") // New state for payment date
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [paymentResult, setPaymentResult] = useState<{
@@ -80,6 +82,7 @@ export default function PayCreditModal({
       setPaymentAmount("")
       setPaymentMethod("Cash")
       setNotes("")
+      setPaymentDate("") // Reset to empty, will use current date as default
       setError(null)
       setPaymentResult(null)
     }
@@ -102,6 +105,18 @@ export default function PayCreditModal({
       return
     }
 
+    // Date validation - if provided, check if it's a valid date
+    let finalPaymentDate: Date | undefined
+    if (paymentDate) {
+      const selectedDate = new Date(paymentDate)
+      if (isNaN(selectedDate.getTime())) {
+        setError("Please enter a valid payment date")
+        return
+      }
+      finalPaymentDate = selectedDate
+    }
+    // If no date provided, use current date (will be handled in backend)
+
     setIsLoading(true)
 
     try {
@@ -112,6 +127,7 @@ export default function PayCreditModal({
         deviceId,
         paymentMethod,
         notes.trim() || undefined,
+        finalPaymentDate // Pass the date to backend
       )
 
       if (result.success && result.data) {
@@ -142,11 +158,14 @@ export default function PayCreditModal({
     maxAmount,
   ].filter((amount, index, arr) => arr.indexOf(amount) === index && amount > 0)
 
+  // Get today's date in YYYY-MM-DD format for the input max attribute
+  const today = new Date().toISOString().split('T')[0]
+
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
       <DialogContent className="max-w-3xl max-h-[95vh] overflow-hidden p-0 bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 flex flex-col [&>button]:hidden">
         {paymentResult ? (
-          // Success View
+          // Success View (unchanged)
           <div className="flex flex-col h-full max-h-[90vh]">
             {/* Success Header */}
             <div className="bg-gradient-to-r from-green-600 to-emerald-600 text-white p-4 relative overflow-hidden">
@@ -445,6 +464,30 @@ export default function PayCreditModal({
                             <SelectItem value="Other">🔄 Other</SelectItem>
                           </SelectContent>
                         </Select>
+                      </div>
+                    </div>
+
+                    {/* Payment Date */}
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label
+                          htmlFor="paymentDate"
+                          className="text-sm font-medium text-gray-700 dark:text-gray-300 flex items-center space-x-1"
+                        >
+                          <CalendarIcon className="h-3 w-3" />
+                          <span>Payment Date (Optional)</span>
+                        </Label>
+                        <Input
+                          id="paymentDate"
+                          type="date"
+                          value={paymentDate}
+                          onChange={(e) => setPaymentDate(e.target.value)}
+                          max={today}
+                          className="h-10 border-2 focus:border-blue-500 rounded-lg dark:bg-gray-700 dark:border-gray-600 dark:text-gray-100"
+                        />
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          {paymentDate ? `Selected: ${new Date(paymentDate).toLocaleDateString()}` : 'Leave empty to use current date'}
+                        </div>
                       </div>
                     </div>
 

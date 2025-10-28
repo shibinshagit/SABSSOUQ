@@ -43,6 +43,12 @@ export function encodeNumberAsLetters(num: number): string {
   return result
 }
 
+// Function to truncate text with ellipsis based on max length
+function truncateText(text: string, maxLength: number): string {
+  if (!text || text.length <= maxLength) return text
+  return text.substring(0, maxLength - 3) + "..."
+}
+
 // Print barcode sticker with quantity control
 export function printBarcodeSticker(product: any, currency = "AED") {
   if (!product) return
@@ -58,6 +64,10 @@ export function printBarcodeSticker(product: any, currency = "AED") {
   const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(product.wholesale_price || "0") || 0
   const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
+  // Truncate long names
+  const companyName = truncateText(product.company_name || "Al Aneeq", 20) // Max 20 chars for company name
+  const productName = truncateText(product.name || "Product", 15) // Max 15 chars for product name
+
   const printWindow = window.open("", "_blank")
   if (!printWindow) {
     alert("Please allow pop-ups to print price tags")
@@ -68,7 +78,7 @@ export function printBarcodeSticker(product: any, currency = "AED") {
     <!DOCTYPE html>
     <html>
     <head>
-      <title>TVS LP40 Price Tag - ${product.name}</title>
+      <title>TVS LP40 Price Tag - ${productName}</title>
       <style>
         @page { size: 80mm auto; margin: 0; }
         body { font-family: Arial, sans-serif; width: 80mm; padding: 2mm; background: #f0f0f0; }
@@ -82,9 +92,11 @@ export function printBarcodeSticker(product: any, currency = "AED") {
         .print-button:hover { background: #45a049; }
         .sticker-row { display: flex; gap: 4mm; margin-bottom: 4mm; }
         .sticker { width: 32mm; height: 22mm; border: 1px solid #000; border-radius: 2mm; padding: 0.5mm 0.5mm 1mm 0.5mm; display: flex; flex-direction: column; justify-content: space-between; background: white; position: relative; }
-        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; }
+        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
         .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; font-weight: bold; }
         .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 18mm; }
+        .product-code { white-space: nowrap; }
         .barcode { width: 31mm; height: 10mm; display: flex; align-items: center; justify-content: center; }
         .barcode svg { width: 100% !important; height: 100% !important; max-width: 31mm !important; }
         .barcode svg { width: 100% !important; height: 100% !important; }
@@ -114,9 +126,9 @@ export function printBarcodeSticker(product: any, currency = "AED") {
       <script>
         let currentQuantity = 1;
         const productData = {
-          companyName: "${(product.company_name || "Al Aneeq").replace(/"/g, '\\"')}",
+          companyName: "${companyName.replace(/"/g, '\\"')}",
           encodedPrice: "${encodedWholesalePrice}",
-          productName: "${(product.name || "Product").replace(/"/g, '\\"')}",
+          productName: "${productName.replace(/"/g, '\\"')}",
           productCode: "${productCode}",
           barcodeValue: "${barcodeValue}",
           currency: "${currency}",
@@ -147,8 +159,8 @@ export function printBarcodeSticker(product: any, currency = "AED") {
               '<div class="company-name">' + productData.companyName + '</div>' +
               (productData.encodedPrice ? '<div class="encoded-price">' + productData.encodedPrice + '</div>' : '') +
               '<div class="product-info">' +
-                '<div>' + productData.productName + '</div>' +
-                '<div>#' + productData.productCode + '</div>' +
+                '<div class="product-name">' + productData.productName + '</div>' +
+                '<div class="product-code">#' + productData.productCode + '</div>' +
               '</div>' +
               '<svg class="barcode" id="barcode' + i + '"></svg>' +
               '<div class="barcode-number">' + productData.barcodeValue + '</div>' +
@@ -204,6 +216,10 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
     const wholesalePrice = typeof product.wholesale_price === "number" ? product.wholesale_price : Number.parseFloat(product.wholesale_price || "0") || 0
     const encodedWholesalePrice = encodeNumberAsLetters(Math.round(wholesalePrice))
 
+    // Truncate long names for multiple stickers
+    const companyName = truncateText(product.company_name || "Al Aneeq", 20)
+    const productName = truncateText(product.name || "Product", 15)
+
     for (let copy = 0; copy < copies; copy++) {
       if (totalStickers % 2 === 0) {
         stickerRows += '<div class="sticker-row">'
@@ -215,11 +231,11 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
       stickerRows += `
         <div class="sticker">
-          <div class="company-name">${product.company_name || "Al Aneeq"}</div>
+          <div class="company-name">${companyName}</div>
           ${encodedWholesalePrice ? `<div class="encoded-price">${encodedWholesalePrice}</div>` : ""}
           <div class="product-info">
-            <div>${product.name || "Product"}</div>
-            <div>#${productCode}</div>
+            <div class="product-name">${productName}</div>
+            <div class="product-code">#${productCode}</div>
           </div>
           <svg class="barcode" id="${barcodeId}"></svg>
           <div class="barcode-number">${barcodeValue}</div>
@@ -264,9 +280,33 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
           justify-space-between; background: white;
           position: relative;
         }
-        .company-name { font-size: 6pt; font-weight: bold; text-align: center; margin-bottom: 0.5mm; }
+        .company-name { 
+          font-size: 6pt; 
+          font-weight: bold; 
+          text-align: center; 
+          margin-bottom: 0.5mm; 
+          white-space: nowrap; 
+          overflow: hidden; 
+          text-overflow: ellipsis; 
+        }
         .encoded-price { position: absolute; top: 0.5mm; right: 0.5mm; font-size: 4pt; }
-        .product-info { display: flex; justify-content: space-between; font-size: 7pt; font-weight: bold; padding: 0 0.5mm; margin-bottom: 0.5mm; }
+        .product-info { 
+          display: flex; 
+          justify-content: space-between; 
+          font-size: 7pt; 
+          font-weight: bold; 
+          padding: 0 0.5mm; 
+          margin-bottom: 0.5mm; 
+        }
+        .product-name { 
+          white-space: nowrap; 
+          overflow: hidden; 
+          text-overflow: ellipsis; 
+          max-width: 18mm; 
+        }
+        .product-code { 
+          white-space: nowrap; 
+        }
         .barcode { width: 31mm; height: 10mm; display: block; }
         .barcode-number { font-size: 6pt; text-align: center; font-weight: bold; letter-spacing: 0.5px; margin: 0.5mm 0; }
         .price-container { text-align: center; font-size: 9pt; font-weight: bold; }
@@ -285,3 +325,4 @@ export function printMultipleBarcodeStickers(products: any[], copies = 1, curren
 
   printWindow.document.close()
 }
+

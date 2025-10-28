@@ -18,6 +18,7 @@ export async function paySupplierCredit(
   deviceId: number,
   paymentMethod = "Cash",
   notes?: string,
+  paymentDate?: Date, // New optional parameter for custom payment date
 ) {
   console.log("paySupplierCredit: Starting payment process", {
     supplierId,
@@ -25,6 +26,7 @@ export async function paySupplierCredit(
     userId,
     deviceId,
     paymentMethod,
+    paymentDate,
   })
 
   if (!supplierId || !paymentAmount || !userId || !deviceId) {
@@ -54,7 +56,6 @@ export async function paySupplierCredit(
     const supplier = supplierResult[0]
 
     // Get all credit purchases for this supplier, ordered by date (oldest first)
-    // FIXED: Only get non-cancelled purchases for payment allocation
     const creditPurchases = await sql`
       SELECT 
         id,
@@ -132,9 +133,18 @@ export async function paySupplierCredit(
       remainingCredit,
     })
 
-    // FIXED: Record the supplier payment transaction with proper local time
-    const now = new Date()
-    const localDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+    // Use provided payment date or current date as default
+    let finalPaymentDate: Date
+    if (paymentDate) {
+      // Use the provided date and adjust for timezone
+      finalPaymentDate = new Date(paymentDate.getTime() - paymentDate.getTimezoneOffset() * 60000)
+      console.log("Using provided payment date:", finalPaymentDate)
+    } else {
+      // Use current date as default
+      const now = new Date()
+      finalPaymentDate = new Date(now.getTime() - now.getTimezoneOffset() * 60000)
+      console.log("Using current date as payment date:", finalPaymentDate)
+    }
 
     const transactionResult = await recordSupplierPayment({
       supplierId: supplierId,
@@ -144,7 +154,7 @@ export async function paySupplierCredit(
       allocations: allocations,
       deviceId: deviceId,
       userId: userId,
-      paymentDate: localDate, // Use timezone-adjusted local date
+      paymentDate: finalPaymentDate, // Use the final determined date
       notes: notes,
     })
 
