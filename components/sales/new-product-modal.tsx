@@ -388,7 +388,7 @@ for (let pair of submitFormData.entries()) {
             <form onSubmit={handleSubmit} className="space-y-4 mt-4">
               <div className="grid gap-4">
                 {/* Product Image Upload */}
-                <div className="grid gap-2">
+                {/* <div className="grid gap-2">
                   <Label className="text-gray-700 dark:text-gray-300">Product Image (Optional)</Label>
                   <div className="flex flex-col gap-2">
                     {imagePreview ? (
@@ -426,7 +426,7 @@ for (let pair of submitFormData.entries()) {
                       className="hidden"
                     />
                   </div>
-                </div>
+                </div> */}
 
                 <div className="grid gap-2">
                   <Label htmlFor="name" className="text-gray-700 dark:text-gray-300">
