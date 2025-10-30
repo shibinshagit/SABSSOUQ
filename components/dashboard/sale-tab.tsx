@@ -231,6 +231,20 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
   const { toast } = useToast()
   const router = useRouter()
 
+  // Add pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const salesPerPage = 7
+  const totalPages = Math.ceil(filteredSales.length / salesPerPage)
+  const paginatedSales = filteredSales.slice((currentPage - 1) * salesPerPage, currentPage * salesPerPage)
+
+  const [autoPrint, setAutoPrint] = useState(() => {
+    const saved = localStorage.getItem("autoPrintReceipt")
+    return saved === "true"
+  })
+  const [showPrintConfirm, setShowPrintConfirm] = useState(false)
+  const [lastSaleResult, setLastSaleResult] = useState<any>(null)
+  const [rememberChoice, setRememberChoice] = useState(false)
+
   // Check if mobile
   useEffect(() => {
     const checkMobile = () => {
@@ -1421,20 +1435,6 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
     )
   }
 
-  // Add pagination state
-  const [currentPage, setCurrentPage] = useState(1)
-  const salesPerPage = 7
-  const totalPages = Math.ceil(filteredSales.length / salesPerPage)
-  const paginatedSales = filteredSales.slice((currentPage - 1) * salesPerPage, currentPage * salesPerPage)
-
-  const [autoPrint, setAutoPrint] = useState(() => {
-    const saved = localStorage.getItem("autoPrintReceipt")
-    return saved === "true"
-  })
-  const [showPrintConfirm, setShowPrintConfirm] = useState(false)
-  const [lastSaleResult, setLastSaleResult] = useState<any>(null)
-  const [rememberChoice, setRememberChoice] = useState(false)
-
   return (
     <div className="min-h-[calc(100vh-100px)] bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 p-2 sm:p-3">
       {/* Tab Navigation */}
@@ -1458,382 +1458,236 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
           </TabsList>
           
           <TabsContent value="sales" className="mt-4">
-            {/* Sales Tab Content */}
+            {/* Sales Tab Content - FIXED SCROLL LAYOUT */}
             <div className="flex flex-col xl:flex-row gap-3 h-full">
-              {/* Main Sale Form Section */}
+              {/* Main Sale Form Section - FIXED SCROLL */}
               <div className="flex-1 xl:w-3/4 flex flex-col min-h-0">
-                {/* Add Sale Form */}
-                <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm">
-                  <CardContent className="p-0 h-full">
-                    {/* Header with edit mode indicator */}
-                    {isEditMode && (
-                      <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
-                            <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
-                              Editing Sale #{editingSaleId}
-                            </span>
-                          </div>
-                          <Button
-                            onClick={resetAddSaleForm}
-                            variant="ghost"
-                            size="sm"
-                            className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
-                          >
-                            Cancel Edit
-                          </Button>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Alerts */}
-                    {(formAlert || barcodeAlert) && (
-                      <div
-                        className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
-                        role="status"
-                        aria-live="polite"
-                      >
-                        {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
-                        {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
-                      </div>
-                    )}
-
-                    {/* Responsive layout for products and sale details */}
-                    <div className="flex flex-col lg:flex-row h-full">
-                      {/* Products section */}
-                      <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
-                        {/* Barcode scanner */}
-                        <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
-                            <div className="relative flex-1">
-                              <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
-                              <Input
-                                aria-label="Scan barcode or search product"
-                                autoComplete="off"
-                                spellCheck={false}
-                                placeholder="Scan barcode or search product..."
-                                className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
-                                  scanStatus === "processing"
-                                    ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
-                                    : scanStatus === "success"
-                                      ? "border-green-500 bg-green-50 dark:bg-green-900/20"
-                                      : scanStatus === "error"
-                                        ? "border-red-500 bg-red-50 dark:bg-red-900/20"
-                                        : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
-                                }`}
-                                value={barcodeInput}
-                                onChange={(e) => {
-                                  setBarcodeInput(e.target.value)
-                                  if (e.target.value.trim() && !isBarcodeProcessing) {
-                                    setTimeout(() => {
-                                      handleBarcodeInput(e.target.value)
-                                    }, 300)
-                                  }
-                                }}
-                                onKeyDown={(e) => {
-                                  if (e.key === "Enter") {
-                                    e.preventDefault()
-                                    if (barcodeInput.trim()) {
-                                      handleBarcodeInput(e.target.value)
-                                    }
-                                  }
-                                }}
-                              />
-                              {scanStatus === "processing" && (
-                                <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
-                              )}
-                              {scanStatus === "success" && (
-                                <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
-                              )}
-                              {scanStatus === "error" && (
-                                <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
-                              )}
+                <Card className="flex-1 overflow-hidden bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 shadow-sm flex flex-col">
+                  <CardContent className="p-0 h-full flex flex-col">
+                    
+                    {/* Fixed Header Section */}
+                    <div className="flex-shrink-0">
+                      {/* Edit mode indicator */}
+                      {isEditMode && (
+                        <div className="p-2 bg-orange-50 dark:bg-orange-900/30 border-b border-orange-200 dark:border-orange-600">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <Edit className="h-4 w-4 text-orange-600 dark:text-orange-400" />
+                              <span className="text-sm font-medium text-orange-800 dark:text-orange-200">
+                                Editing Sale #{editingSaleId}
+                              </span>
                             </div>
                             <Button
-                              type="button"
-                              onClick={() => {
-                                if (barcodeInput.trim()) {
-                                  handleBarcodeInput(barcodeInput)
-                                }
-                              }}
-                              disabled={isBarcodeProcessing || !barcodeInput}
+                              onClick={resetAddSaleForm}
+                              variant="ghost"
                               size="sm"
-                              className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 sm:px-6"
+                              className="text-orange-600 dark:text-orange-400 hover:bg-orange-100 dark:hover:bg-orange-900/50"
                             >
-                              Add
+                              Cancel Edit
                             </Button>
                           </div>
                         </div>
+                      )}
 
-                        {/* Products table header */}
-                        <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700">
-                          <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
-                          <div className="flex flex-wrap gap-1">
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setIsNewServiceModalOpen(true)}
-                              className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
-                            >
-                              <Wrench className="h-3 w-3" />
-                              <span className="hidden sm:inline">Service</span>
-                            </Button>
-
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => setIsNewProductModalOpen(true)}
-                              className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
-                            >
-                              <Plus className="h-3 w-3" />
-                              <span className="hidden sm:inline">Product</span>
-                            </Button>
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={addProductRow}
-                              className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
-                            >
-                              <Plus className="h-3 w-3" />
-                              <span className="hidden sm:inline">Row</span>
-                            </Button>
-                          </div>
+                      {/* Alerts */}
+                      {(formAlert || barcodeAlert) && (
+                        <div
+                          className="p-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800"
+                          role="status"
+                          aria-live="polite"
+                        >
+                          {formAlert && <FormAlert type={formAlert.type} message={formAlert.message} />}
+                          {barcodeAlert && <FormAlert type={barcodeAlert.type} message={barcodeAlert.message} />}
                         </div>
+                      )}
+                    </div>
 
-                        {/* Products table - responsive */}
-                        <div className="flex-1 overflow-x-auto overflow-y-auto">
-                          {/* Desktop table header */}
-                          <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
-                            <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
-                              <div className="col-span-3">Product/Service</div>
-                              <div className="col-span-2">Notes</div>
-                              <div className="col-span-1 text-center">Qty</div>
-                              <div className="col-span-2 text-center">Price</div>
-                              <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
-                              <div className="col-span-1 text-center">Total</div>
-                              <div className="col-span-1"></div>
-                            </div>
-                          </div>
-
-                          {/* Desktop table rows */}
-                          <div className="hidden lg:block min-w-[800px]">
-                            {products.map((product, index) => (
-                              <div
-                                key={product.id}
-                                className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
-                                  index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
-                                } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
-                              >
-                                <div className="col-span-3">
-                                  {product.productId && product.productName ? (
-                                    <div className="flex items-center justify-between">
-                                      <div className="flex items-center gap-2 flex-1">
-                                        {product.isService ? (
-                                          <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
-                                        ) : (
-                                          <div className="h-4 w-4 flex-shrink-0" />
-                                        )}
-                                        <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
-                                          {product.productName}
-                                        </span>
-                                      </div>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
-                                        onClick={() => {
-                                          updateProductRow(product.id, {
-                                            productId: null,
-                                            productName: "",
-                                            price: 0,
-                                            cost: 0,
-                                            stock: 0,
-                                            total: 0,
-                                            notes: "",
-                                            isService: false,
-                                            serviceId: undefined,
-                                          })
-                                        }}
-                                      >
-                                        <ChevronsUpDown className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <ProductSelectSimple
-                                      id={`product-select-${product.id}`}
-                                      value={product.productId}
-                                      onChange={(productId, productName, price, wholesalePrice, stock) =>
-                                        handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
-                                      }
-                                      onAddNew={() => setIsNewProductModalOpen(true)}
-                                      onAddNewService={() => setIsNewServiceModalOpen(true)}
-                                      userId={userId}
-                                    />
-                                  )}
-                                </div>
-                                <div className="col-span-2">
-                                  <Input
-                                    placeholder="Notes..."
-                                    value={product.notes || ""}
-                                    onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                                    className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                  />
-                                </div>
-                                <div className="col-span-1">
-                                  <Input
-                                    type="number"
-                                    min="1"
-                                    value={product.quantity}
-                                    onChange={(e) => {
-                                      const newQuantity = Number.parseInt(e.target.value) || 0
-                                      if (product.stock !== undefined && newQuantity > product.stock) {
-                                        setBarcodeAlert({
-                                          type: "warning",
-                                          message: `Only ${product.stock} units available for ${product.productName}`,
-                                        })
-                                        updateProductRow(product.id, { quantity: product.stock })
-                                      } else {
-                                        updateProductRow(product.id, { quantity: newQuantity })
-                                      }
-                                    }}
-                                    className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                  />
-                                </div>
-                                <div className="col-span-2">
-                                  <Input
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={product.price}
-                                    onChange={(e) =>
-                                      updateProductRow(product.id, {
-                                        price: Number.parseFloat(e.target.value) || 0,
-                                      })
+                    {/* Scrollable Content Area */}
+                    <div className="flex-1 overflow-hidden flex flex-col">
+                      <div className="flex flex-col lg:flex-row h-full">
+                        {/* Products section */}
+                        <div className="flex-1 lg:w-[70%] flex flex-col border-b lg:border-b-0 lg:border-r border-gray-200 dark:border-gray-700">
+                          {/* Barcode scanner */}
+                          <div className="p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                              <div className="relative flex-1">
+                                <Barcode className="absolute left-2.5 top-2.5 h-4 w-4 text-gray-400" />
+                                <Input
+                                  aria-label="Scan barcode or search product"
+                                  autoComplete="off"
+                                  spellCheck={false}
+                                  placeholder="Scan barcode or search product..."
+                                  className={`pl-8 h-9 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100 placeholder-gray-500 dark:placeholder-gray-400 transition-all duration-200 ${
+                                    scanStatus === "processing"
+                                      ? "border-yellow-500 bg-yellow-50 dark:bg-yellow-900/20"
+                                      : scanStatus === "success"
+                                        ? "border-green-500 bg-green-50 dark:bg-green-900/20"
+                                        : scanStatus === "error"
+                                          ? "border-red-500 bg-red-50 dark:bg-red-900/20"
+                                          : "border-gray-300 dark:border-gray-600 focus:border-blue-500 dark:focus:border-blue-400"
+                                  }`}
+                                  value={barcodeInput}
+                                  onChange={(e) => {
+                                    setBarcodeInput(e.target.value)
+                                    if (e.target.value.trim() && !isBarcodeProcessing) {
+                                      setTimeout(() => {
+                                        handleBarcodeInput(e.target.value)
+                                      }, 300)
                                     }
-                                    className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                  />
-                                </div>
-                                <div className="col-span-2">
-                                  {privacyMode ? (
-                                    <div className="flex items-center justify-center h-7">
-                                      <EyeOff className="h-3 w-3 text-gray-400" />
-                                    </div>
-                                  ) : (
-                                    <Input
-                                      type="number"
-                                      min="0"
-                                      step="0.01"
-                                      value={product.cost || 0}
-                                      onChange={(e) =>
-                                        updateProductRow(product.id, {
-                                          cost: Number.parseFloat(e.target.value) || 0,
-                                        })
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault()
+                                      if (barcodeInput.trim()) {
+                                        handleBarcodeInput(e.target.value)
                                       }
-                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                    />
-                                  )}
-                                </div>
-                                <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
-                                  {deviceCurrencyState} {product.total.toFixed(2)}
-                                </div>
-                                <div className="col-span-1 flex justify-center">
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="icon"
-                                    onClick={() => removeProductRow(product.id)}
-                                    disabled={products.length === 1}
-                                    className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
-                                  >
-                                    <Trash2 className="h-3 w-3" />
-                                  </Button>
-                                </div>
+                                    }
+                                  }}
+                                />
+                                {scanStatus === "processing" && (
+                                  <Loader2 className="absolute right-2.5 top-2.5 h-4 w-4 animate-spin text-yellow-500" />
+                                )}
+                                {scanStatus === "success" && (
+                                  <CheckCircle2 className="absolute right-2.5 top-2.5 h-4 w-4 text-green-500" />
+                                )}
+                                {scanStatus === "error" && (
+                                  <XCircle className="absolute right-2.5 top-2.5 h-4 w-4 text-red-500" />
+                                )}
                               </div>
-                            ))}
+                              <Button
+                                type="button"
+                                onClick={() => {
+                                  if (barcodeInput.trim()) {
+                                    handleBarcodeInput(barcodeInput)
+                                  }
+                                }}
+                                disabled={isBarcodeProcessing || !barcodeInput}
+                                size="sm"
+                                className="bg-blue-600 hover:bg-blue-700 text-white h-9 px-4 sm:px-6"
+                              >
+                                Add
+                              </Button>
+                            </div>
                           </div>
 
-                          {/* Mobile card layout */}
-                          <div className="lg:hidden">
-                            {products.map((product, index) => (
-                              <div
-                                key={product.id}
-                                className={`p-3 border-b border-gray-200 dark:border-gray-700 ${
-                                  index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
-                                }`}
+                          {/* Products table header */}
+                          <div className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 flex-shrink-0">
+                            <h3 className="font-medium text-sm text-gray-800 dark:text-gray-200">Products & Services</h3>
+                            <div className="flex flex-wrap gap-1">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsNewServiceModalOpen(true)}
+                                className="flex items-center gap-1 text-green-600 dark:text-green-400 border-green-300 dark:border-green-600 hover:bg-green-50 dark:hover:bg-green-900/20 h-7 text-xs"
                               >
-                                {/* Product Selection */}
-                                <div className="mb-3">
-                                  <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                    Product/Service
-                                  </Label>
-                                  {product.productId && product.productName ? (
-                                    <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-600 rounded">
-                                      <div className="flex items-center gap-2">
-                                        {product.isService && (
-                                          <Wrench className="h-4 w-4 text-green-600 dark:text-green-400" />
-                                        )}
-                                        <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
-                                          {product.productName}
-                                        </span>
+                                <Wrench className="h-3 w-3" />
+                                <span className="hidden sm:inline">Service</span>
+                              </Button>
+
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => setIsNewProductModalOpen(true)}
+                                className="flex items-center gap-1 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-600 hover:bg-blue-50 dark:hover:bg-blue-900/20 h-7 text-xs"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span className="hidden sm:inline">Product</span>
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={addProductRow}
+                                className="flex items-center gap-1 border-gray-300 dark:border-gray-600 hover:bg-gray-50 dark:hover:bg-gray-700 h-7 text-xs bg-transparent"
+                              >
+                                <Plus className="h-3 w-3" />
+                                <span className="hidden sm:inline">Row</span>
+                              </Button>
+                            </div>
+                          </div>
+
+                          {/* Products table - scrollable area */}
+                          <div className="flex-1 overflow-x-auto overflow-y-auto min-h-0">
+                            {/* Desktop table header */}
+                            <div className="hidden lg:block sticky top-0 z-10 min-w-[800px]">
+                              <div className="grid grid-cols-12 gap-1 p-2 bg-gray-100 dark:bg-gray-700 font-medium text-xs text-gray-700 dark:text-gray-200 border-b border-gray-200 dark:border-gray-600">
+                                <div className="col-span-3">Product/Service</div>
+                                <div className="col-span-2">Notes</div>
+                                <div className="col-span-1 text-center">Qty</div>
+                                <div className="col-span-2 text-center">Price</div>
+                                <div className="col-span-2 text-center">{privacyMode ? "****" : "Cost"}</div>
+                                <div className="col-span-1 text-center">Total</div>
+                                <div className="col-span-1"></div>
+                              </div>
+                            </div>
+
+                            {/* Desktop table rows */}
+                            <div className="hidden lg:block min-w-[800px]">
+                              {products.map((product, index) => (
+                                <div
+                                  key={product.id}
+                                  className={`grid grid-cols-12 gap-1 p-2 items-center border-b border-gray-200 dark:border-gray-700 ${
+                                    index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                                  } hover:bg-gray-100 dark:hover:bg-gray-600 transition-colors duration-150`}
+                                >
+                                  <div className="col-span-3">
+                                    {product.productId && product.productName ? (
+                                      <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2 flex-1">
+                                          {product.isService ? (
+                                            <Wrench className="h-4 w-4 text-green-600 dark:text-green-400 flex-shrink-0" />
+                                          ) : (
+                                            <div className="h-4 w-4 flex-shrink-0" />
+                                          )}
+                                          <span className="truncate flex-1 font-medium text-xs text-gray-900 dark:text-gray-200">
+                                            {product.productName}
+                                          </span>
+                                        </div>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0 text-gray-400 hover:text-blue-500 dark:hover:text-blue-400"
+                                          onClick={() => {
+                                            updateProductRow(product.id, {
+                                              productId: null,
+                                              productName: "",
+                                              price: 0,
+                                              cost: 0,
+                                              stock: 0,
+                                              total: 0,
+                                              notes: "",
+                                              isService: false,
+                                              serviceId: undefined,
+                                            })
+                                          }}
+                                        >
+                                          <ChevronsUpDown className="h-3 w-3" />
+                                        </Button>
                                       </div>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        className="h-6 w-6 p-0"
-                                        onClick={() => {
-                                          updateProductRow(product.id, {
-                                            productId: null,
-                                            productName: "",
-                                            price: 0,
-                                            cost: 0,
-                                            stock: 0,
-                                            total: 0,
-                                            notes: "",
-                                            isService: false,
-                                            serviceId: undefined,
-                                          })
-                                        }}
-                                      >
-                                        <ChevronsUpDown className="h-3 w-3" />
-                                      </Button>
-                                    </div>
-                                  ) : (
-                                    <ProductSelectSimple
-                                      id={`product-select-mobile-${product.id}`}
-                                      value={product.productId}
-                                      onChange={(productId, productName, price, wholesalePrice, stock) =>
-                                        handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
-                                      }
-                                      onAddNew={() => setIsNewProductModalOpen(true)}
-                                      onAddNewService={() => setIsNewServiceModalOpen(true)}
-                                      userId={userId}
+                                    ) : (
+                                      <ProductSelectSimple
+                                        id={`product-select-${product.id}`}
+                                        value={product.productId}
+                                        onChange={(productId, productName, price, wholesalePrice, stock) =>
+                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                        }
+                                        onAddNew={() => setIsNewProductModalOpen(true)}
+                                        onAddNewService={() => setIsNewServiceModalOpen(true)}
+                                        userId={userId}
+                                      />
+                                    )}
+                                  </div>
+                                  <div className="col-span-2">
+                                    <Input
+                                      placeholder="Notes..."
+                                      value={product.notes || ""}
+                                      onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                                      className="text-xs h-7 bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                                     />
-                                  )}
-                                </div>
-
-                                {/* Notes */}
-                                <div className="mb-3">
-                                  <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                    Notes
-                                  </Label>
-                                  <Input
-                                    placeholder="Notes..."
-                                    value={product.notes || ""}
-                                    onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
-                                    className="text-sm h-8"
-                                  />
-                                </div>
-
-                                {/* Quantity, Price, Cost row */}
-                                <div className="grid grid-cols-3 gap-2 mb-3">
-                                  <div>
-                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                      Qty
-                                    </Label>
+                                  </div>
+                                  <div className="col-span-1">
                                     <Input
                                       type="number"
                                       min="1"
@@ -1850,13 +1704,10 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                           updateProductRow(product.id, { quantity: newQuantity })
                                         }
                                       }}
-                                      className="text-center h-8 text-sm"
+                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                                     />
                                   </div>
-                                  <div>
-                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                      Price
-                                    </Label>
+                                  <div className="col-span-2">
                                     <Input
                                       type="number"
                                       min="0"
@@ -1867,15 +1718,12 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                           price: Number.parseFloat(e.target.value) || 0,
                                         })
                                       }
-                                      className="text-center h-8 text-sm"
+                                      className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                                     />
                                   </div>
-                                  <div>
-                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
-                                      {privacyMode ? "****" : "Cost"}
-                                    </Label>
+                                  <div className="col-span-2">
                                     {privacyMode ? (
-                                      <div className="flex items-center justify-center h-8 bg-gray-100 dark:bg-gray-600 rounded border">
+                                      <div className="flex items-center justify-center h-7">
                                         <EyeOff className="h-3 w-3 text-gray-400" />
                                       </div>
                                     ) : (
@@ -1889,229 +1737,386 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                                             cost: Number.parseFloat(e.target.value) || 0,
                                           })
                                         }
-                                        className="text-center h-8 text-sm"
+                                        className="text-center h-7 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
                                       />
                                     )}
                                   </div>
-                                </div>
-
-                                {/* Total and Delete */}
-                                <div className="flex items-center justify-between">
-                                  <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
-                                    Total: {deviceCurrencyState} {product.total.toFixed(2)}
+                                  <div className="col-span-1 flex items-center justify-center font-medium text-xs text-gray-900 dark:text-gray-200">
+                                    {deviceCurrencyState} {product.total.toFixed(2)}
                                   </div>
-                                  <Button
-                                    type="button"
-                                    variant="ghost"
-                                    size="sm"
-                                    onClick={() => removeProductRow(product.id)}
-                                    disabled={products.length === 1}
-                                    className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                                  >
-                                    <Trash2 className="h-4 w-4 mr-1" />
-                                    Remove
-                                  </Button>
-                                </div>
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      </div>
-
-                      {/* Sale details section */}
-                      <div className="w-full lg:w-[30%] flex flex-col bg-white dark:bg-gray-800 min-h-0 max-h-[600px] lg:max-h-none">
-                        <div className="p-3 border-b border-gray-200 dark:border-gray-700 overflow-y-auto flex-1">
-                          <div className="space-y-3">
-                            {/* Customer */}
-                            <div className="space-y-1">
-                              <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                                Customer
-                              </Label>
-                              <CustomerSelectSimple
-                                value={customerId}
-                                onChange={(value, name) => {
-                                  setCustomerId(value)
-                                  if (name) setCustomerName(name)
-                                }}
-                                onAddNew={() => setIsNewCustomerModalOpen(true)}
-                                userId={userId}
-                              />
-                            </div>
-
-                            {/* Status */}
-                            <div className="space-y-1">
-                              <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
-                                Status
-                              </Label>
-                              <select
-                                id="status"
-                                className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
-                                value={status}
-                                onChange={(e) => setStatus(e.target.value)}
-                              >
-                                <option value="Completed">Completed</option>
-                                <option value="Credit">Credit</option>
-                                <option value="Pending">Pending</option>
-                                <option value="Cancelled">Cancelled</option>
-                              </select>
-                            </div>
-
-                            {/* Staff and Date - responsive layout */}
-                            <div className="flex flex-col sm:flex-row gap-2">
-                              <div className="flex flex-col space-y-1 flex-1">
-                                <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                  <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
-                                  Staff *
-                                </Label>
-                                <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
-                              </div>
-
-                              <div className="flex flex-col space-y-1 flex-1">
-                                <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                  <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                                  Date
-                                </Label>
-                                <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
-                                  <div className="dark:text-white">
-                                    <DatePickerField date={date} onDateChange={setDate} />
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-
-                            {/* Received Amount for Credit */}
-                            {status === "Credit" && (
-                              <div className="space-y-1">
-                                <Label
-                                  htmlFor="received_amount"
-                                  className="text-xs font-medium text-gray-900 dark:text-gray-200"
-                                >
-                                  Received Amount
-                                </Label>
-                                <Input
-                                  id="received_amount"
-                                  type="number"
-                                  min="0"
-                                  max={totalAmount}
-                                  step="0.01"
-                                  value={receivedAmount}
-                                  onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
-                                  className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
-                                  placeholder="0.00"
-                                />
-                                <p className="text-xs text-gray-500 dark:text-gray-400">
-                                  Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
-                                </p>
-                              </div>
-                            )}
-
-                            {/* Payment Method for Completed - responsive grid */}
-                            {status === "Completed" && (
-                              <div className="space-y-1">
-                                <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
-                                  <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
-                                  Payment Method
-                                </Label>
-                                <RadioGroup
-                                  value={paymentMethod}
-                                  onValueChange={setPaymentMethod}
-                                  className="grid grid-cols-1 sm:grid-cols-3 gap-1"
-                                >
-                                  <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                                    <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
-                                    <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
-                                      Cash
-                                    </Label>
-                                  </div>
-                                  <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                                    <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
-                                    <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
-                                      Card
-                                    </Label>
-                                  </div>
-                                  <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
-                                    <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
-                                    <Label
-                                      htmlFor="online"
-                                      className="cursor-pointer text-xs text-gray-900 dark:text-gray-200"
+                                  <div className="col-span-1 flex justify-center">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      onClick={() => removeProductRow(product.id)}
+                                      disabled={products.length === 1}
+                                      className="h-6 w-6 p-0 text-gray-400 hover:text-red-500 dark:hover:text-red-400"
                                     >
-                                      Online
-                                    </Label>
+                                      <Trash2 className="h-3 w-3" />
+                                    </Button>
                                   </div>
-                                </RadioGroup>
-                              </div>
-                            )}
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* Mobile card layout */}
+                            <div className="lg:hidden">
+                              {products.map((product, index) => (
+                                <div
+                                  key={product.id}
+                                  className={`p-3 border-b border-gray-200 dark:border-gray-700 ${
+                                    index % 2 === 0 ? "bg-white dark:bg-gray-800" : "bg-gray-50 dark:bg-gray-700"
+                                  }`}
+                                >
+                                  {/* Product Selection */}
+                                  <div className="mb-3">
+                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                      Product/Service
+                                    </Label>
+                                    {product.productId && product.productName ? (
+                                      <div className="flex items-center justify-between p-2 bg-gray-100 dark:bg-gray-600 rounded">
+                                        <div className="flex items-center gap-2">
+                                          {product.isService && (
+                                            <Wrench className="h-4 w-4 text-green-600 dark:text-green-400" />
+                                          )}
+                                          <span className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                                            {product.productName}
+                                          </span>
+                                        </div>
+                                        <Button
+                                          variant="ghost"
+                                          size="sm"
+                                          className="h-6 w-6 p-0"
+                                          onClick={() => {
+                                            updateProductRow(product.id, {
+                                              productId: null,
+                                              productName: "",
+                                              price: 0,
+                                              cost: 0,
+                                              stock: 0,
+                                              total: 0,
+                                              notes: "",
+                                              isService: false,
+                                              serviceId: undefined,
+                                            })
+                                          }}
+                                        >
+                                          <ChevronsUpDown className="h-3 w-3" />
+                                        </Button>
+                                      </div>
+                                    ) : (
+                                      <ProductSelectSimple
+                                        id={`product-select-mobile-${product.id}`}
+                                        value={product.productId}
+                                        onChange={(productId, productName, price, wholesalePrice, stock) =>
+                                          handleProductSelect(product.id, productId, productName, price, wholesalePrice, stock)
+                                        }
+                                        onAddNew={() => setIsNewProductModalOpen(true)}
+                                        onAddNewService={() => setIsNewServiceModalOpen(true)}
+                                        userId={userId}
+                                      />
+                                    )}
+                                  </div>
+
+                                  {/* Notes */}
+                                  <div className="mb-3">
+                                    <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                      Notes
+                                    </Label>
+                                    <Input
+                                      placeholder="Notes..."
+                                      value={product.notes || ""}
+                                      onChange={(e) => updateProductRow(product.id, { notes: e.target.value })}
+                                      className="text-sm h-8"
+                                    />
+                                  </div>
+
+                                  {/* Quantity, Price, Cost row */}
+                                  <div className="grid grid-cols-3 gap-2 mb-3">
+                                    <div>
+                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                        Qty
+                                      </Label>
+                                      <Input
+                                        type="number"
+                                        min="1"
+                                        value={product.quantity}
+                                        onChange={(e) => {
+                                          const newQuantity = Number.parseInt(e.target.value) || 0
+                                          if (product.stock !== undefined && newQuantity > product.stock) {
+                                            setBarcodeAlert({
+                                              type: "warning",
+                                              message: `Only ${product.stock} units available for ${product.productName}`,
+                                            })
+                                            updateProductRow(product.id, { quantity: product.stock })
+                                          } else {
+                                            updateProductRow(product.id, { quantity: newQuantity })
+                                          }
+                                        }}
+                                        className="text-center h-8 text-sm"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                        Price
+                                      </Label>
+                                      <Input
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={product.price}
+                                        onChange={(e) =>
+                                          updateProductRow(product.id, {
+                                            price: Number.parseFloat(e.target.value) || 0,
+                                          })
+                                        }
+                                        className="text-center h-8 text-sm"
+                                      />
+                                    </div>
+                                    <div>
+                                      <Label className="text-xs font-medium text-gray-700 dark:text-gray-300 mb-1 block">
+                                        {privacyMode ? "****" : "Cost"}
+                                      </Label>
+                                      {privacyMode ? (
+                                        <div className="flex items-center justify-center h-8 bg-gray-100 dark:bg-gray-600 rounded border">
+                                          <EyeOff className="h-3 w-3 text-gray-400" />
+                                        </div>
+                                      ) : (
+                                        <Input
+                                          type="number"
+                                          min="0"
+                                          step="0.01"
+                                          value={product.cost || 0}
+                                          onChange={(e) =>
+                                            updateProductRow(product.id, {
+                                              cost: Number.parseFloat(e.target.value) || 0,
+                                            })
+                                          }
+                                          className="text-center h-8 text-sm"
+                                        />
+                                      )}
+                                    </div>
+                                  </div>
+
+                                  {/* Total and Delete */}
+                                  <div className="flex items-center justify-between">
+                                    <div className="text-sm font-medium text-gray-900 dark:text-gray-200">
+                                      Total: {deviceCurrencyState} {product.total.toFixed(2)}
+                                    </div>
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="sm"
+                                      onClick={() => removeProductRow(product.id)}
+                                      disabled={products.length === 1}
+                                      className="text-red-500 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                                    >
+                                      <Trash2 className="h-4 w-4 mr-1" />
+                                      Remove
+                                    </Button>
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
                           </div>
                         </div>
 
-                        {/* Sale summary */}
-                        <div className="p-3 flex flex-col">
-                          <div className="bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
-                            <div className="p-3 space-y-2">
-                              <div className="flex justify-between items-center py-1">
-                                <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
-                                <span className="text-sm text-gray-900 dark:text-gray-100">
-                                  {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
-                                </span>
+                        {/* Sale details section */}
+                        <div className="w-full lg:w-[30%] flex flex-col bg-white dark:bg-gray-800 min-h-0">
+                          <div className="p-3 border-b border-gray-200 dark:border-gray-700 overflow-y-auto flex-1">
+                            <div className="space-y-3">
+                              {/* Customer */}
+                              <div className="space-y-1">
+                                <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                                  <User className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                  Customer
+                                </Label>
+                                <CustomerSelectSimple
+                                  value={customerId}
+                                  onChange={(value, name) => {
+                                    setCustomerId(value)
+                                    if (name) setCustomerName(name)
+                                  }}
+                                  onAddNew={() => setIsNewCustomerModalOpen(true)}
+                                  userId={userId}
+                                />
                               </div>
 
-                              <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
-                                <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
-                                <div className="w-20">
+                              {/* Status */}
+                              <div className="space-y-1">
+                                <Label htmlFor="status" className="text-xs font-medium text-gray-900 dark:text-gray-200">
+                                  Status
+                                </Label>
+                                <select
+                                  id="status"
+                                  className="flex h-8 w-full items-center justify-between rounded-md border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-700 px-2 py-1 text-xs text-gray-900 dark:text-gray-100"
+                                  value={status}
+                                  onChange={(e) => setStatus(e.target.value)}
+                                >
+                                  <option value="Completed">Completed</option>
+                                  <option value="Credit">Credit</option>
+                                  <option value="Pending">Pending</option>
+                                  <option value="Cancelled">Cancelled</option>
+                                </select>
+                              </div>
+
+                              {/* Staff and Date - responsive layout */}
+                              <div className="flex flex-col sm:flex-row gap-2">
+                                <div className="flex flex-col space-y-1 flex-1">
+                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                                    <Users className="h-3 w-3 mr-1 text-green-500 dark:text-green-400" />
+                                    Staff *
+                                  </Label>
+                                  <StaffHeaderDropdown userId={userId} showInSaleModal={true} />
+                                </div>
+
+                                <div className="flex flex-col space-y-1 flex-1">
+                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                                    <Calendar className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                    Date
+                                  </Label>
+                                  <div className="[&_button]:text-gray-900 [&_button]:dark:text-gray-100 [&_button]:bg-white [&_button]:dark:bg-gray-700 [&_button]:border-gray-300 [&_button]:dark:border-gray-600">
+                                    <div className="dark:text-white">
+                                      <DatePickerField date={date} onDateChange={setDate} />
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Received Amount for Credit */}
+                              {status === "Credit" && (
+                                <div className="space-y-1">
+                                  <Label
+                                    htmlFor="received_amount"
+                                    className="text-xs font-medium text-gray-900 dark:text-gray-200"
+                                  >
+                                    Received Amount
+                                  </Label>
                                   <Input
+                                    id="received_amount"
                                     type="number"
                                     min="0"
+                                    max={totalAmount}
                                     step="0.01"
-                                    value={discountAmount}
-                                    onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
-                                    className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                                    value={receivedAmount}
+                                    onChange={(e) => setReceivedAmount(Number.parseFloat(e.target.value) || 0)}
+                                    className="h-8 text-xs bg-white dark:bg-gray-700 border-gray-300 dark:border-gray-600 text-gray-900 dark:text-gray-100"
+                                    placeholder="0.00"
                                   />
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    Remaining: {deviceCurrencyState} {(totalAmount - receivedAmount).toFixed(2)}
+                                  </p>
                                 </div>
-                              </div>
+                              )}
 
-                              <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
-                                <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
-                                <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
-                                  {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
+                              {/* Payment Method for Completed - responsive grid */}
+                              {status === "Completed" && (
+                                <div className="space-y-1">
+                                  <Label className="text-xs font-medium flex items-center text-gray-900 dark:text-gray-200">
+                                    <CreditCard className="h-3 w-3 mr-1 text-blue-500 dark:text-blue-400" />
+                                    Payment Method
+                                  </Label>
+                                  <RadioGroup
+                                    value={paymentMethod}
+                                    onValueChange={setPaymentMethod}
+                                    className="grid grid-cols-1 sm:grid-cols-3 gap-1"
+                                  >
+                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                      <RadioGroupItem value="Cash" id="cash" className="h-3 w-3" />
+                                      <Label htmlFor="cash" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                        Cash
+                                      </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                      <RadioGroupItem value="Card" id="card" className="h-3 w-3" />
+                                      <Label htmlFor="card" className="cursor-pointer text-xs text-gray-900 dark:text-gray-200">
+                                        Card
+                                      </Label>
+                                    </div>
+                                    <div className="flex items-center space-x-1 bg-gray-50 dark:bg-gray-700 p-1 rounded-md border border-gray-200 dark:border-gray-600">
+                                      <RadioGroupItem value="Online" id="online" className="h-3 w-3" />
+                                      <Label
+                                        htmlFor="online"
+                                        className="cursor-pointer text-xs text-gray-900 dark:text-gray-200"
+                                      >
+                                        Online
+                                      </Label>
+                                    </div>
+                                  </RadioGroup>
                                 </div>
-                              </div>
+                              )}
                             </div>
                           </div>
 
-                          {/* Complete Sale button */}
-                          <div className="mt-3">
-                            <Button
-                              onClick={handleSubmitSale}
-                              disabled={isSubmitting}
-                              className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
-                            >
-                              {isSubmitting ? (
-                                <span className="flex items-center justify-center">
-                                  <Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...
-                                </span>
-                              ) : (
-                                <span className="flex items-center justify-center">
-                                  <Save className="h-4 w-4 mr-2" /> {isEditMode ? "Update Sale" : "Complete Sale"}
-                                </span>
-                              )}
-                            </Button>
+                          {/* Sale summary */}
+                          <div className="p-3 flex flex-col border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800">
+                            <div className="bg-white dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600 shadow-sm flex flex-col">
+                              <div className="p-3 space-y-2">
+                                <div className="flex justify-between items-center py-1">
+                                  <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Subtotal:</span>
+                                  <span className="text-sm text-gray-900 dark:text-gray-100">
+                                    {deviceCurrencyState} {(typeof subtotal === "number" ? subtotal : 0).toFixed(2)}
+                                  </span>
+                                </div>
 
-                            <div className="mt-2 flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1">
-                              <label htmlFor="auto-print" className="text-xs text-gray-700 dark:text-gray-300">
-                                Auto‑print receipt
-                              </label>
-                              <input
-                                id="auto-print"
-                                type="checkbox"
-                                checked={autoPrint}
-                                onChange={(e) => {
-                                  setAutoPrint(e.target.checked)
-                                  localStorage.setItem("autoPrintReceipt", e.target.checked ? "true" : "false")
-                                }}
-                                className="h-4 w-4 accent-blue-600"
-                                aria-label="Toggle auto-print receipt"
-                              />
+                                <div className="flex justify-between items-center py-1 border-t border-gray-200 dark:border-gray-600">
+                                  <span className="font-medium text-xs text-gray-900 dark:text-gray-200">Discount:</span>
+                                  <div className="w-20">
+                                    <Input
+                                      type="number"
+                                      min="0"
+                                      step="0.01"
+                                      value={discountAmount}
+                                      onChange={(e) => setDiscountAmount(Number.parseFloat(e.target.value) || 0)}
+                                      className="text-right h-7 text-xs bg-white dark:bg-gray-600 border-gray-300 dark:border-gray-500 text-gray-900 dark:text-gray-100"
+                                    />
+                                  </div>
+                                </div>
+
+                                <div className="flex justify-between items-center py-2 border-t border-gray-200 dark:border-gray-600 bg-blue-50 dark:bg-blue-900/30 p-2 rounded-md">
+                                  <span className="font-bold text-blue-700 dark:text-blue-300 text-sm">Total:</span>
+                                  <div className="font-bold text-blue-700 dark:text-blue-300 text-lg">
+                                    {deviceCurrencyState} {(typeof totalAmount === "number" ? totalAmount : 0).toFixed(2)}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Complete Sale button - FIXED POSITION */}
+                            <div className="mt-3">
+                              <Button
+                                onClick={handleSubmitSale}
+                                disabled={isSubmitting}
+                                className="w-full bg-blue-600 hover:bg-blue-700 text-white h-auto py-2"
+                              >
+                                {isSubmitting ? (
+                                  <span className="flex items-center justify-center">
+                                    <Loader2 className="h-4 w-4 animate-spin mr-2" /> Processing...
+                                  </span>
+                                ) : (
+                                  <span className="flex items-center justify-center">
+                                    <Save className="h-4 w-4 mr-2" /> {isEditMode ? "Update Sale" : "Complete Sale"}
+                                  </span>
+                                )}
+                              </Button>
+
+                              <div className="mt-2 flex items-center justify-between rounded-md border border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-700 px-2 py-1">
+                                <label htmlFor="auto-print" className="text-xs text-gray-700 dark:text-gray-300">
+                                  Auto‑print receipt
+                                </label>
+                                <input
+                                  id="auto-print"
+                                  type="checkbox"
+                                  checked={autoPrint}
+                                  onChange={(e) => {
+                                    setAutoPrint(e.target.checked)
+                                    localStorage.setItem("autoPrintReceipt", e.target.checked ? "true" : "false")
+                                  }}
+                                  className="h-4 w-4 accent-blue-600"
+                                  aria-label="Toggle auto-print receipt"
+                                />
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2121,7 +2126,7 @@ export default function SaleTab({ userId, isAddModalOpen = false, onModalClose }
                 </Card>
               </div>
 
-              {/* Right side - Summary and Sales List - wraps below on smaller screens */}
+              {/* Right side - Summary and Sales List */}
               <div className="w-full xl:w-1/4 flex flex-col space-y-3 min-h-0">
                 {/* Summary Cards - responsive grid */}
                 <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-3 gap-2">
