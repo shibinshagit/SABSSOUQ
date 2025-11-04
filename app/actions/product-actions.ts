@@ -165,6 +165,9 @@ async function uploadProductImage(file: File, productName: string): Promise<stri
 }
 
 // NEW: Updated getProducts function with limit and search functionality
+// Add this improved version to your product-actions.ts file
+// Replace the existing getProducts function
+
 export async function getProducts(userId?: number, limit?: number, searchTerm?: string) {
   resetConnectionState()
   await ensureProductsTable()
@@ -174,6 +177,48 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
 
   try {
     let products
+
+    // Check if searchTerm is a pure number (likely an ID lookup)
+    const isIdSearch = searchTerm && /^\d+$/.test(searchTerm.trim())
+
+    if (isIdSearch) {
+      // EXACT ID MATCH - highest priority
+      const productId = parseInt(searchTerm!.trim(), 10)
+      
+      console.log('Exact ID search for:', productId)
+      
+      if (userId) {
+        products = await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.id = ${productId}
+          AND p.created_by = ${userId}
+        `
+      } else {
+        products = await sql`
+          SELECT 
+            p.*,
+            c.name as category_name
+          FROM products p
+          LEFT JOIN product_categories c ON p.category_id = c.id
+          WHERE p.id = ${productId}
+        `
+      }
+      
+      // If exact match found, return immediately
+      if (products.length > 0) {
+        const mappedProducts = products.map((product) => ({
+          ...product,
+          category: product.category_name || product.category || "",
+        }))
+        
+        console.log(`Found exact product match for ID ${productId}:`, mappedProducts[0])
+        return { success: true, data: mappedProducts }
+      }
+    }
 
     if (searchTerm && searchTerm.trim() !== "") {
       // Normalize search term: lowercase + remove spaces
@@ -193,10 +238,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              p.id::text LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
             )
-            ORDER BY p.created_at DESC
+            ORDER BY 
+              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+              p.created_at DESC
             LIMIT ${limit}
           `
         } else {
@@ -211,10 +257,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              p.id::text LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
             )
-            ORDER BY p.created_at DESC
+            ORDER BY 
+              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+              p.created_at DESC
             LIMIT ${limit}
           `
         }
@@ -233,10 +280,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              p.id::text LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
             )
-            ORDER BY p.created_at DESC
+            ORDER BY 
+              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+              p.created_at DESC
           `
         } else {
           products = await sql`
@@ -250,10 +298,11 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
               REPLACE(LOWER(p.category), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.company_name), ' ', '') LIKE ${searchPattern} OR
               REPLACE(LOWER(p.shelf), ' ', '') LIKE ${searchPattern} OR
-              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern} OR
-              p.id::text LIKE ${searchPattern}
+              REPLACE(COALESCE(p.barcode, ''), ' ', '') LIKE ${searchPattern}
             )
-            ORDER BY p.created_at DESC
+            ORDER BY 
+              CASE WHEN p.id::text = ${searchTerm.trim()} THEN 0 ELSE 1 END,
+              p.created_at DESC
           `
         }
       }
@@ -325,6 +374,7 @@ export async function getProducts(userId?: number, limit?: number, searchTerm?: 
     }
   }
 }
+
 
 export async function getProductById(id: number) {
   if (!id) {

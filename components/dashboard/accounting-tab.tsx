@@ -62,6 +62,9 @@ import EditPurchaseModal from "../purchases/edit-purchase-modal"
 import EditSaleModal from "../sales/edit-sale-modal"
 import ViewManualTransactionModal from "../manual/ViewManualTransactionModal"
 import EditManualTransactionModal from "../manual/EditManualTransactionModal"
+import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
+import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
+
 interface AccountingTabProps {
   userId: number
   companyId: number
@@ -226,24 +229,30 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // View modal states
   const [viewSaleId, setViewSaleId] = useState<number | null>(null)
   const [viewPurchaseId, setViewPurchaseId] = useState<number | null>(null)
+  const [viewManualTransactionId, setViewManualTransactionId] = useState<number | null>(null)
+  const [viewSupplierPaymentId, setViewSupplierPaymentId] = useState<number | null>(null)
 
   // Edit modal states
   const [editSaleId, setEditSaleId] = useState<number | null>(null)
   const [editPurchaseId, setEditPurchaseId] = useState<number | null>(null)
+  const [editManualTransactionId, setEditManualTransactionId] = useState<number | null>(null)
+  const [editSupplierPaymentId, setEditSupplierPaymentId] = useState<number | null>(null)
 
   // Loading states for delete operations
   const [deletingSaleId, setDeletingSaleId] = useState<number | null>(null)
   const [deletingPurchaseId, setDeletingPurchaseId] = useState<number | null>(null)
-
-  // New states for viewing and editing manual transactions
-  const [viewManualTransactionId, setViewManualTransactionId] = useState<number | null>(null)
-  const [editManualTransactionId, setEditManualTransactionId] = useState<number | null>(null)
 
   // Debug logging for transaction structure
   useEffect(() => {
     if (financialData?.transactions && financialData.transactions.length > 0) {
       console.log("Sample transaction structure:", financialData.transactions[0])
       console.log("All transaction keys:", Object.keys(financialData.transactions[0]))
+      
+      // Log supplier payments specifically
+      const supplierPayments = financialData.transactions.filter(
+        t => t.type === 'supplier_payment' || t.description?.toLowerCase().includes('supplier payment')
+      )
+      console.log("Supplier payments in store:", supplierPayments)
     }
   }, [financialData])
 
@@ -325,7 +334,9 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         toLocal: toDateFixed.toLocaleString(),
       })
 
-      const data = await getFinancialSummary(deviceId, fromDateFixed, toDateFixed)
+      // Add cache busting to prevent stale data
+      const cacheBuster = Date.now()
+      const data = await getFinancialSummary(deviceId, fromDateFixed, toDateFixed, cacheBuster)
 
       // Log the received data for debugging
       console.log("Received financial data:", {
@@ -386,6 +397,28 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     } catch (error) {
       console.error("Error loading accounting balances:", error)
       toast.error("Failed to load account balances")
+    }
+  }
+
+  // Force refresh all data
+  const forceRefreshData = async () => {
+    try {
+      dispatch(setLoading(true))
+      dispatch(setFinancialData(null))
+      dispatch(setBalances(null))
+      
+      // Add a small delay to ensure state is cleared
+      await new Promise(resolve => setTimeout(resolve, 100))
+      
+      await loadFinancialData(false)
+      await loadAccountingBalances(dateFrom, dateTo)
+      
+      toast.success("Data refreshed successfully")
+    } catch (error) {
+      console.error("Error force refreshing data:", error)
+      toast.error("Failed to refresh data")
+    } finally {
+      dispatch(setLoading(false))
     }
   }
 
@@ -534,7 +567,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         setManualCategory("")
         setManualPaymentMethod("Cash")
         setManualDate(new Date())
-        loadFinancialData(false)
+        await forceRefreshData()
       } else {
         toast.error("Failed to add manual transaction")
       }
@@ -549,8 +582,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Enhanced sale handlers for ViewSaleModal
   const handleEditSale = (saleId: number) => {
     console.log("Opening edit sale modal for:", saleId)
-    setViewSaleId(null) // Close view modal
-    setEditSaleId(saleId) // Open edit modal
+    setViewSaleId(null)
+    setEditSaleId(saleId)
   }
 
   const handleDeleteSale = async (saleId: number) => {
@@ -566,16 +599,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       
       if (response.success) {
         toast.success(response.message || "Sale deleted successfully")
-        
-        // Refresh financial data to reflect the changes
-        loadFinancialData(false)
-        
-        // Also refresh balances
-        loadAccountingBalances(dateFrom, dateTo)
-        
-        // Close the modal
+        await forceRefreshData()
         setViewSaleId(null)
-        
         console.log(`Sale ${saleId} deleted successfully`)
       } else {
         throw new Error(response.message || "Failed to delete sale")
@@ -591,8 +616,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Enhanced purchase handlers for ViewPurchaseModal
   const handleEditPurchase = (purchaseId: number) => {
     console.log("Opening edit purchase modal for:", purchaseId)
-    setViewPurchaseId(null) // Close view modal
-    setEditPurchaseId(purchaseId) // Open edit modal
+    setViewPurchaseId(null)
+    setEditPurchaseId(purchaseId)
   }
 
   const handleDeletePurchase = async (purchaseId: number) => {
@@ -608,16 +633,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       
       if (response.success) {
         toast.success(response.message || "Purchase deleted successfully")
-        
-        // Refresh financial data to reflect the changes
-        loadFinancialData(false)
-        
-        // Also refresh balances
-        loadAccountingBalances(dateFrom, dateTo)
-        
-        // Close the modal
+        await forceRefreshData()
         setViewPurchaseId(null)
-        
         console.log(`Purchase ${purchaseId} deleted successfully`)
       } else {
         throw new Error(response.message || "Failed to delete purchase")
@@ -630,19 +647,30 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     }
   }
 
-  // Handle successful edits
-  const handleSaleUpdated = () => {
+  // Supplier payment handlers
+  const handleEditSupplierPayment = (paymentId: number) => {
+    console.log("Opening edit supplier payment modal for:", paymentId)
+    setViewSupplierPaymentId(null)
+    setEditSupplierPaymentId(paymentId)
+  }
+
+  // Handle successful edits with force refresh
+  const handleSaleUpdated = async () => {
     setEditSaleId(null)
-    loadFinancialData(false)
-    loadAccountingBalances(dateFrom, dateTo)
+    await forceRefreshData()
     toast.success("Sale updated successfully")
   }
 
-  const handlePurchaseUpdated = () => {
+  const handlePurchaseUpdated = async () => {
     setEditPurchaseId(null)
-    loadFinancialData(false)
-    loadAccountingBalances(dateFrom, dateTo)
+    await forceRefreshData()
     toast.success("Purchase updated successfully")
+  }
+
+  const handleSupplierPaymentUpdated = async () => {
+    setEditSupplierPaymentId(null)
+    await forceRefreshData()
+    toast.success("Supplier payment updated successfully")
   }
 
   const handlePrintReport = () => {
@@ -925,6 +953,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const getNetImpact = (transaction: any) => {
+    // For supplier payments, ensure we're calculating correctly
+    if (transaction.type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
+      return -Math.abs(transaction.debit || transaction.amount)
+    }
     return transaction.credit - transaction.debit
   }
 
@@ -1102,10 +1134,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
             variant="secondary"
             size="sm"
             className="bg-white/20 text-white border-0 hover:bg-white/30"
-            onClick={() => {
-              loadAccountingBalances(dateFrom, dateTo)
-              loadFinancialData(false)
-            }}
+            onClick={forceRefreshData}
             disabled={isLoading || isBackgroundLoading}
           >
             {isLoading || isBackgroundLoading ? (
@@ -1284,13 +1313,15 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   const netImpact = getNetImpact(transaction)
                   const isPositive = netImpact >= 0
 
-                  // Determine if this is a sale or purchase and extract the correct ID
+                  // Determine transaction type and extract the correct ID
                   const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
                   const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
                   const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
+                  const isSupplierPayment = transaction.type === "supplier_payment" || 
+                                           transaction.description?.toLowerCase().includes("supplier payment")
+                  
                   const handleClick = () => {
                     if (isSale) {
-                      // Try multiple ways to get the sale ID
                       const saleId = transaction.sale_id || 
                                     transaction.reference_id || 
                                     extractIdFromDescription(transaction.description) ||
@@ -1298,7 +1329,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       console.log('Opening sale modal with ID:', saleId, 'Transaction:', transaction)
                       setViewSaleId(saleId)
                     } else if (isPurchase) {
-                      // Try multiple ways to get the purchase ID
                       const purchaseId = transaction.purchase_id || 
                                         transaction.reference_id || 
                                         extractIdFromDescription(transaction.description) ||
@@ -1307,6 +1337,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       setViewPurchaseId(purchaseId)
                     } else if (isManual) {
                       setViewManualTransactionId(transaction.id)
+                    } else if (isSupplierPayment) {
+                      const paymentId = transaction.supplier_payment_id || 
+                                       transaction.reference_id || 
+                                       transaction.id
+                      console.log('Opening supplier payment modal with ID:', paymentId, 'Transaction:', transaction)
+                      setViewSupplierPaymentId(paymentId)
                     }
                   }
 
@@ -1317,7 +1353,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       onClick={handleClick}
                       tabIndex={0}
                       role="button"
-                      aria-label={isSale ? "View Sale" : isPurchase ? "View Purchase" : "View Transaction"}
+                      aria-label={
+                        isSale ? "View Sale" : 
+                        isPurchase ? "View Purchase" : 
+                        isSupplierPayment ? "View Supplier Payment" : 
+                        "View Transaction"
+                      }
                     >
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
@@ -1361,8 +1402,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                               >
                                 {currency}{" "}
                                 {getNetImpact(transaction) >= 0
-                                  ? transaction.received.toFixed(2)
-                                  : Math.abs(getNetImpact(transaction)).toFixed(2)}
+                                  ? transaction.credit.toFixed(2)
+                                  : Math.abs(transaction.debit || transaction.amount).toFixed(2)}
                               </div>
                             </div>
                             <div className="text-right">
@@ -1778,8 +1819,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         isDeleting={deletingSaleId === viewSaleId}
       />
 
-
-
       {/* View Purchase Modal */}
       <ViewPurchaseModal
         isOpen={!!viewPurchaseId}
@@ -1814,25 +1853,21 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       />
 
       {/* View Manual Transaction Modal */}
-      {/* View Manual Transaction Modal */}
-<ViewManualTransactionModal
-  isOpen={!!viewManualTransactionId}
-  onClose={() => setViewManualTransactionId(null)}
-  transactionId={viewManualTransactionId}
-  currency={currency}
-  deviceId={deviceId} // Add this line
-  onEdit={(id) => {
-    setViewManualTransactionId(null)
-    setEditManualTransactionId(id)
-  }}
-  onTransactionDeleted={() => {
-    // Refresh data after deletion
-    loadFinancialData(false)
-    loadAccountingBalances(dateFrom, dateTo)
-    toast.success("Manual transaction deleted successfully")
-  }}
-/>
-
+      <ViewManualTransactionModal
+        isOpen={!!viewManualTransactionId}
+        onClose={() => setViewManualTransactionId(null)}
+        transactionId={viewManualTransactionId}
+        currency={currency}
+        deviceId={deviceId}
+        onEdit={(id) => {
+          setViewManualTransactionId(null)
+          setEditManualTransactionId(id)
+        }}
+        onTransactionDeleted={() => {
+          forceRefreshData()
+          toast.success("Manual transaction deleted successfully")
+        }}
+      />
 
       {/* Edit Manual Transaction Modal */}
       <EditManualTransactionModal
@@ -1842,12 +1877,33 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         currency={currency}
         onTransactionUpdated={() => {
           setEditManualTransactionId(null)
-          // reload financial data if needed
-          loadFinancialData(false)
+          forceRefreshData()
         }}
+      />
+
+      {/* View Supplier Payment Modal */}
+      <ViewSupplierPaymentModal
+        isOpen={!!viewSupplierPaymentId}
+        onClose={() => setViewSupplierPaymentId(null)}
+        paymentId={viewSupplierPaymentId}
+        currency={currency}
+        deviceId={deviceId}
+        onEdit={handleEditSupplierPayment}
+        onPaymentDeleted={() => {
+          forceRefreshData()
+          toast.success("Supplier payment deleted successfully")
+        }}
+      />
+
+      <EditSupplierPaymentModal
+        isOpen={!!editSupplierPaymentId}
+        onClose={() => setEditSupplierPaymentId(null)}
+        paymentId={editSupplierPaymentId}
+        userId={userId}
+        deviceId={deviceId}
+        currency={currency}
+        onPaymentUpdated={handleSupplierPaymentUpdated}
       />
     </div>
   )
 }
-
-

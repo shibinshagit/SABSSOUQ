@@ -536,3 +536,4 @@ export async function addManualTransaction(data: {
     return { success: false, message: "Failed to add manual transaction" }
   }
 }
+
