@@ -482,8 +482,11 @@ export async function testSupplierPaymentFetch(paymentId: number) {
 
 
 /**
- * Update supplier payment in financial_transactions
+ * FIXED: Update supplier payment in financial_transactions
  * This handles changes to amount, payment method, date, and notes
+ * 
+ * CRITICAL FIX: Now updates debit_amount and credit_amount to ensure 
+ * the accounting tab displays "Spend" and "Net Impact" correctly
  */
 export async function updateSupplierPayment(data: {
   paymentId: number
@@ -696,11 +699,14 @@ export async function updateSupplierPayment(data: {
       // Build updated description
       const updatedDescription = `Supplier Payment - ${supplierName} - ${data.paymentMethod} - ${purchaseCount} purchase(s) affected`
 
-      // Update the financial transaction
+      // ✅ CRITICAL FIX: Update ALL financial fields including debit_amount and credit_amount
+      // This ensures the accounting tab displays Spend and Net Impact correctly
       await sql`
         UPDATE financial_transactions
         SET 
           amount = ${newAmount},
+          debit_amount = ${newAmount},
+          credit_amount = 0,
           payment_method = ${data.paymentMethod},
           transaction_date = ${finalPaymentDate},
           notes = ${data.notes || null},
@@ -712,10 +718,12 @@ export async function updateSupplierPayment(data: {
 
       await sql`COMMIT`
 
-      console.log('Supplier payment updated successfully')
+      console.log('Supplier payment updated successfully - all financial fields synchronized')
 
+      // Revalidate paths to clear cache
       revalidatePath("/dashboard")
       revalidatePath("/dashboard?tab=accounting")
+      revalidatePath("/", "layout")
       
       return {
         success: true,
