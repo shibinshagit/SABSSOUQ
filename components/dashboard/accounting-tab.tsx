@@ -113,8 +113,8 @@ const TransactionSkeleton = () => (
             <Skeleton className="h-4 w-16" />
           </div>
           <div className="text-right">
-            <Skeleton className="h-3 w-16 mb-1" />
-            <Skeleton className="h-4 w-20" />
+            <Skeleton className="h-3 w-12 mb-1" />
+            <Skeleton className="h-4 w-16" />
           </div>
         </div>
         <div className="min-w-[120px] text-right">
@@ -169,10 +169,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [tempDateFrom, setTempDateFrom] = useState<Date>(new Date())
   const [tempDateTo, setTempDateTo] = useState<Date>(new Date())
 
-  // Calculate proper last week's date range - from previous week start to today
+  // Calculate proper last week's date range
   const today = new Date()
-  const currentWeekStart = startOfWeek(today, { weekStartsOn: 1 }) // Monday as start of week
-  const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 }) // Previous week Monday
+  const currentWeekStart = startOfWeek(today, { weekStartsOn: 1 })
+  const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 })
   const todayEnd = new Date(today)
   todayEnd.setHours(23, 59, 59, 999)
 
@@ -192,13 +192,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return null
   }
 
-  // Initialize date range to today instead of last week
+  // Initialize date range to today
   const [dateFrom, setDateFrom] = useState<Date>(() => {
     if (storedDateRange.dateFrom) {
       const storedFrom = safeParseDateString(storedDateRange.dateFrom)
       if (storedFrom) return storedFrom
     }
-    // Default to today instead of last week
     const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
     return todayStart
   })
@@ -208,7 +207,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const storedTo = safeParseDateString(storedDateRange.dateTo)
       if (storedTo) return storedTo
     }
-    // Default to today end
     return todayEnd
   })
 
@@ -242,35 +240,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [deletingSaleId, setDeletingSaleId] = useState<number | null>(null)
   const [deletingPurchaseId, setDeletingPurchaseId] = useState<number | null>(null)
 
-  // Debug logging for transaction structure
-  useEffect(() => {
-    if (financialData?.transactions && financialData.transactions.length > 0) {
-      console.log("Sample transaction structure:", financialData.transactions[0])
-      console.log("All transaction keys:", Object.keys(financialData.transactions[0]))
-      
-      // Log supplier payments specifically
-      const supplierPayments = financialData.transactions.filter(
-        t => t.type === 'supplier_payment' || t.description?.toLowerCase().includes('supplier payment')
-      )
-      console.log("Supplier payments in store:", supplierPayments)
-    }
-  }, [financialData])
-
-  // Debug logging for date issues
-  useEffect(() => {
-    console.log("Current date range:", {
-      dateFrom: format(dateFrom, "yyyy-MM-dd HH:mm:ss"),
-      dateTo: format(dateTo, "yyyy-MM-dd HH:mm:ss"),
-      fromLocal: dateFrom.toLocaleString(),
-      toLocal: dateTo.toLocaleString(),
-    })
-  }, [dateFrom, dateTo])
-
-  // Handle date changes and update Redux - using same approach as sales tab
+  // Handle date changes and update Redux
   const handleDateFromChange = (date: Date | undefined) => {
     if (!date) return
 
-    // Create a new date to avoid reference issues and set to start of day
     const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
     setDateFrom(newDate)
     dispatch(
@@ -284,7 +257,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const handleDateToChange = (date: Date | undefined) => {
     if (!date) return
 
-    // Create a new date to avoid reference issues and set to end of day
     const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
     setDateTo(newDate)
     dispatch(
@@ -323,29 +295,20 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      // Use the dates as they are - no additional timezone manipulation
       const fromDateFixed = new Date(dateFrom)
       const toDateFixed = new Date(dateTo)
 
       console.log("Fetching financial data with date range:", {
         from: format(fromDateFixed, "yyyy-MM-dd HH:mm:ss"),
         to: format(toDateFixed, "yyyy-MM-dd HH:mm:ss"),
-        fromLocal: fromDateFixed.toLocaleString(),
-        toLocal: toDateFixed.toLocaleString(),
       })
 
-      // Add cache busting to prevent stale data
       const cacheBuster = Date.now()
       const data = await getFinancialSummary(deviceId, fromDateFixed, toDateFixed, cacheBuster)
 
-      // Log the received data for debugging
       console.log("Received financial data:", {
         transactionCount: data.transactions?.length || 0,
         firstTransactionDate: data.transactions?.[0]?.date,
-        dateRange: {
-          from: format(fromDateFixed, "yyyy-MM-dd HH:mm:ss"),
-          to: format(toDateFixed, "yyyy-MM-dd HH:mm:ss"),
-        },
       })
 
       dispatch(setFinancialData(data))
@@ -376,7 +339,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      // Calculate opening balance: all transactions BEFORE our date range
       const dayBeforeFrom = new Date(
         fromDate.getFullYear(),
         fromDate.getMonth(),
@@ -387,7 +349,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         999,
       )
 
-      // Calculate closing balance: all transactions UP TO our end date
       const endOfToDate = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate(), 23, 59, 59, 999)
 
       const balanceData = await getAccountingBalances(deviceId, dayBeforeFrom, endOfToDate)
@@ -407,7 +368,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       dispatch(setFinancialData(null))
       dispatch(setBalances(null))
       
-      // Add a small delay to ensure state is cleared
       await new Promise(resolve => setTimeout(resolve, 100))
       
       await loadFinancialData(false)
@@ -425,7 +385,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Initial load and date change effect
   useEffect(() => {
     if (deviceId) {
-      // Load balances for our date range
       loadAccountingBalances(dateFrom, dateTo)
 
       if (
@@ -457,7 +416,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       .replace(/[A-Z]{3}\s?/, `${currency} `)
   }
 
-  // Updated formatDateTime function to handle both string and Date inputs
+  // Updated formatDateTime function
   const formatDateTime = (dateInput: string | Date) => {
     let date: Date
 
@@ -474,12 +433,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     }
 
     return {
-      date: format(date, "MMM d, yyyy"), // e.g., "Dec 17, 2025" - same as sales page
-      time: format(date, "HH:mm"), // e.g., "14:30" - 24-hour format
+      date: format(date, "MMM d, yyyy"),
+      time: format(date, "HH:mm"),
     }
   }
 
-  // Updated formatDate function to handle both string and Date inputs
+  // Updated formatDate function
   const formatDateOnly = (dateInput: string | Date) => {
     let date: Date
 
@@ -495,7 +454,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       return "Invalid Date"
     }
 
-    return format(date, "MMM d, yyyy") // e.g., "Dec 17, 2025"
+    return format(date, "MMM d, yyyy")
   }
 
   const getStatusBadge = (status: string) => {
@@ -737,11 +696,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 <div class="value">${currency} ${getProfit().toFixed(2)}</div>
               </div>
               <div class="summary-card">
-                <h3>Amount Received</h3>
+                <h3>Money In</h3>
                 <div class="value">${currency} ${getAmountReceived().toFixed(2)}</div>
               </div>
               <div class="summary-card">
-                <h3>Total Spends</h3>
+                <h3>Money Out</h3>
                 <div class="value">${currency} ${getSpends().toFixed(2)}</div>
               </div>
               <div class="summary-card">
@@ -765,10 +724,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <th>Description</th>
                   <th>Type</th>
                   <th>Status</th>
-                  <th>Amount</th>
-                  <th>${filteredTransactions.length > 0 ? "Received" : "Spend"}</th>
-                  <th>Cost</th>
-                  <th>Net Impact</th>
+                  <th>Transaction Amount</th>
+                  <th>Money Flow</th>
+                  <th>Product Cost (COGS)</th>
+                  <th>Cash Impact</th>
                 </tr>
               </thead>
               <tbody>
@@ -776,6 +735,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   .map((t) => {
                     const dateTime = formatDateTime(t.date)
                     const netImpact = getNetImpact(t)
+                    const moneyFlow = getMoneyFlowDisplay(t)
                     return `
                     <tr>
                       <td>${dateTime.date}</td>
@@ -783,10 +743,12 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <td>${t.type || "Unknown"}</td>
                       <td>${t.status}</td>
                       <td>${currency} ${t.amount.toFixed(2)}</td>
-                      <td>${getNetImpact(t) >= 0 ? currency + " " + t.received.toFixed(2) : currency + " " + Math.abs(getNetImpact(t)).toFixed(2)}</td>
+                      <td style="color: ${moneyFlow.color.includes('green') ? "#059669" : moneyFlow.color.includes('red') ? "#dc2626" : "#6b7280"}">
+                        ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
+                      </td>
                       <td>${currency} ${t.cost.toFixed(2)}</td>
-                      <td style="color: ${netImpact >= 0 ? "#059669" : "#dc2626"}">
-                        ${netImpact >= 0 ? "" : "-"}${currency} ${Math.abs(netImpact).toFixed(2)}
+                      <td style="color: ${netImpact > 0 ? "#059669" : netImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
+                        ${netImpact > 0 ? "+" : netImpact < 0 ? "-" : ""}${currency} ${Math.abs(netImpact).toFixed(2)}
                       </td>
                     </tr>
                   `
@@ -820,15 +782,146 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Helper function to extract ID from description
   const extractIdFromDescription = (desc: string) => {
     if (!desc) return null
-    // Match patterns like "Sale #123" or "Purchase #456"
     const match = desc.match(/#(\d+)/)
     return match ? parseInt(match[1]) : null
   }
 
-  // Enhanced filtering with income/expense and proper date comparison - using same date-fns approach
+  // FIXED: Calculate remaining amount for credit sales - handle partial payments
+  const getRemainingAmount = (transaction: any) => {
+  const status = transaction.status?.toLowerCase()
+  const totalAmount = Number(transaction.amount) || 0
+  const receivedAmount = Number(transaction.received) || 0
+  
+  // For credit sales, remaining = total amount - received amount
+  if (status === 'credit') {
+    const remaining = totalAmount - receivedAmount
+    return Math.max(0, remaining)
+  }
+  
+  // For completed sales with partial payment (edge case)
+  if (status === 'completed' && receivedAmount < totalAmount) {
+    const remaining = totalAmount - receivedAmount
+    return Math.max(0, remaining)
+  }
+  
+  return 0
+}
+
+// FIXED: Get net impact with proper partial credit sale handling
+const getNetImpact = (transaction: any) => {
+  const status = transaction.status?.toLowerCase()
+  const type = transaction.type?.toLowerCase()
+  const totalAmount = Number(transaction.amount) || 0
+  const receivedAmount = Number(transaction.received) || 0
+  const costAmount = Number(transaction.cost) || 0
+  
+  // For supplier payments, cash impact is negative
+  if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(transaction.debit || transaction.amount)
+  }
+  
+  // FIXED: For credit sales - cash impact = received amount - proportional COGS
+  if (status === 'credit') {
+    if (receivedAmount > 0) {
+      // Partial payment received: cash impact = received amount - proportional COGS
+      const paymentRatio = totalAmount > 0 ? receivedAmount / totalAmount : 0
+      const proportionalCost = costAmount * paymentRatio
+      return receivedAmount - proportionalCost
+    } else {
+      // No payment received: no cash impact
+      return 0
+    }
+  }
+  
+  // For completed sales: cash impact = received amount - cost
+  if ((status === 'completed' || status === 'paid') && 
+      (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
+    return receivedAmount - costAmount
+  }
+  
+  // For purchases: cash impact = -debit amount (money going out)
+  if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
+    return -Math.abs(transaction.debit || transaction.amount)
+  }
+  
+  // For manual debit transactions: cash impact = -amount
+  if (type === 'manual' && transaction.debit > 0) {
+    return -transaction.debit
+  }
+  
+  // For manual credit transactions: cash impact = +amount
+  if (type === 'manual' && transaction.credit > 0) {
+    return transaction.credit
+  }
+  
+  // Default calculation (should rarely be used)
+  return transaction.credit - transaction.debit
+}
+
+  // FIXED: Get money flow display text and color for partial credit sales
+  const getMoneyFlowDisplay = (transaction: any) => {
+  const status = transaction.status?.toLowerCase()
+  const netImpact = getNetImpact(transaction)
+  const receivedAmount = Number(transaction.received) || 0
+  const totalAmount = Number(transaction.amount) || 0
+  
+  // FIXED: For credit sales with partial payment
+  if (status === 'credit') {
+    if (receivedAmount > 0 && receivedAmount < totalAmount) {
+      // Partial payment received
+      return {
+        text: "Partial Payment",
+        color: "text-green-600 dark:text-green-400",
+        value: receivedAmount,
+        showAmount: true
+      }
+    } else if (receivedAmount === 0) {
+      // No payment received - completely credit
+      return {
+        text: "Pending",
+        color: "text-yellow-600 dark:text-yellow-400",
+        value: 0,
+        showAmount: false
+      }
+    } else if (receivedAmount >= totalAmount) {
+      // Fully paid credit sale (edge case)
+      return {
+        text: "Money In",
+        color: "text-green-600 dark:text-green-400",
+        value: receivedAmount,
+        showAmount: true
+      }
+    }
+  }
+  
+  if (netImpact > 0) {
+    return {
+      text: "Money In",
+      color: "text-green-600 dark:text-green-400",
+      value: transaction.received || transaction.credit,
+      showAmount: true
+    }
+  } else if (netImpact < 0) {
+    return {
+      text: "Money Out",
+      color: "text-red-600 dark:text-red-400",
+      value: Math.abs(transaction.debit || transaction.amount),
+      showAmount: true
+    }
+  } else {
+    return {
+      text: "No Cash Impact",
+      color: "text-gray-600 dark:text-gray-400",
+      value: 0,
+      showAmount: false
+    }
+  }
+}
+
+// FIXED: Get actual money received (only cash inflows) - include partial credit payments
+  // Enhanced filtering with income/expense and proper date comparison
   const filteredTransactions =
     financialData?.transactions?.filter((transaction) => {
-      // First apply search filter
       const description = transaction.description || ""
       const account = transaction.account || ""
 
@@ -837,25 +930,21 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         account.toLowerCase().includes(searchTerm.toLowerCase()) ||
         transaction.status.toLowerCase().includes(searchTerm.toLowerCase())
 
-      // Apply type filter including income/expense and description-based filtering
       let matchesType = true
-      const netImpact = transaction.credit - transaction.debit
+      const netImpact = getNetImpact(transaction)
 
       if (filterType === "income") {
-        matchesType = netImpact > 0 // Positive net impact
+        matchesType = netImpact > 0
       } else if (filterType === "expense") {
-        matchesType = netImpact < 0 // Negative net impact
+        matchesType = netImpact < 0
       } else if (filterType === "sale") {
-        // Match both transaction type "sale" and descriptions starting with "Sale"
         matchesType = transaction.type === "sale" || description.toLowerCase().startsWith("sale")
       } else if (filterType === "purchase") {
-        // Match both transaction type "purchase" and descriptions starting with "Purchase"
         matchesType = transaction.type === "purchase" || description.toLowerCase().startsWith("purchase")
       } else if (filterType !== "all") {
         matchesType = transaction.type === filterType
       }
 
-      // Date filtering using proper date comparison without timezone issues - same as sales tab
       let transactionDate: Date
 
       if (transaction.date instanceof Date) {
@@ -863,14 +952,13 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       } else if (typeof transaction.date === "string") {
         transactionDate = parseISO(transaction.date)
       } else {
-        return false // Skip invalid date types
+        return false
       }
 
       if (!isValid(transactionDate)) {
-        return false // Skip invalid dates
+        return false
       }
 
-      // Compare dates using year, month, day only - same as sales tab
       const transactionDateOnly = new Date(
         transactionDate.getFullYear(),
         transactionDate.getMonth(),
@@ -904,7 +992,6 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const getProfit = () => {
-    // Calculate profit from filtered sales transactions only
     const filteredCogs =
       filteredTransactions?.reduce((sum, t) => {
         return t.type === "sale" || t.description?.toLowerCase().startsWith("sale") ? sum + t.cost : sum
@@ -913,23 +1000,36 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     return getSalesTotal() - filteredCogs
   }
 
+  // FIXED: Get actual money received (only cash inflows) - include partial credit payments
   const getAmountReceived = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return sum + t.credit
-      }, 0) || 0
-    )
-  }
+  return filteredTransactions?.reduce((sum, t) => {
+    const status = t.status?.toLowerCase()
+    
+    // FIXED: For credit sales, count the received amount (partial payments)
+    if (status === 'credit') {
+      return sum + (t.received || 0)
+    }
+    
+    // For completed sales, count received amount
+    if ((status === 'completed' || status === 'paid') && 
+        (t.type === 'sale' || t.description?.toLowerCase().startsWith('sale'))) {
+      return sum + (t.received || t.credit)
+    }
+    
+    // For other credit transactions
+    return sum + t.credit
+  }, 0) || 0
+}
 
+
+  // FIXED: Get actual money spent (only cash outflows)
   const getSpends = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return sum + t.debit
-      }, 0) || 0
-    )
+    return filteredTransactions?.reduce((sum, t) => {
+      // Count all debit transactions (money going out)
+      return sum + t.debit
+    }, 0) || 0
   }
 
-  // Add new function to get filtered COGS
   const getFilteredCogs = () => {
     return (
       filteredTransactions?.reduce((sum, t) => {
@@ -938,26 +1038,13 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     )
   }
 
-  // Updated balance calculations to work with filtered data
+  // FIXED BALANCE CALCULATIONS - Only actual cash movements
   const getOpeningBalance = () => {
     return balances?.openingBalance || 0
   }
 
   const getClosingBalance = () => {
-    // For filtered data, calculate closing balance as:
-    // Opening Balance + Net Impact of Filtered Transactions
-    const openingBalance = balances?.openingBalance || 0
-    const netImpactFromFiltered = getAmountReceived() - getSpends()
-
-    return openingBalance + netImpactFromFiltered
-  }
-
-  const getNetImpact = (transaction: any) => {
-    // For supplier payments, ensure we're calculating correctly
-    if (transaction.type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
-      return -Math.abs(transaction.debit || transaction.amount)
-    }
-    return transaction.credit - transaction.debit
+    return balances?.closingBalance || getOpeningBalance() + (getAmountReceived() - getSpends())
   }
 
   const getTransactionTypeIcon = (type: string) => {
@@ -971,9 +1058,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     }
   }
 
-  // Use same date formatting as sales tab
   const formatDate = (date: Date) => {
-    return format(date, "M/d/yyyy") // e.g., "12/17/2025"
+    return format(date, "M/d/yyyy")
   }
 
   const setToday = () => {
@@ -986,9 +1072,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   const setLastWeek = () => {
-    // Last week: from previous week start (Monday) to today
     const today = new Date()
-    const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 }) // Previous week Monday
+    const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 })
     const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
 
     handleDateFromChange(lastWeekStart)
@@ -1023,7 +1108,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (
-                  `${getOpeningBalance() >= 0 ? "+" : ""}${currency} ${getOpeningBalance().toFixed(2)}`
+                  `${currency} ${getOpeningBalance().toFixed(2)}`
                 )}
               </div>
             </div>
@@ -1033,7 +1118,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 {isDataLoading ? (
                   <Skeleton className="h-6 w-24 bg-white/20" />
                 ) : (
-                  `${getClosingBalance() >= 0 ? "+" : ""}${currency} ${getClosingBalance().toFixed(2)}`
+                  `${currency} ${getClosingBalance().toFixed(2)}`
                 )}
               </div>
             </div>
@@ -1215,35 +1300,35 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 </CardContent>
               </Card>
 
-              {/* Amount Received */}
+              {/* Money In */}
               <Card className="bg-[#10b981] text-white">
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <ArrowDownCircle className="h-4 w-4" />
-                    <span className="text-xs">Received</span>
+                    <span className="text-xs">Money In</span>
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Credits: {filteredTransactions.filter((t) => t.credit > 0).length}
+                    Inflows: {filteredTransactions.filter((t) => getNetImpact(t) > 0).length}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Spends */}
+              {/* Money Out */}
               <Card className="bg-[#ef4444] text-white">
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
                     <CreditCard className="h-4 w-4" />
-                    <span className="text-xs">Spends</span>
+                    <span className="text-xs">Money Out</span>
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Debits: {filteredTransactions.filter((t) => t.debit > 0).length}
+                    Outflows: {filteredTransactions.filter((t) => getNetImpact(t) < 0).length}
                   </div>
                 </CardContent>
               </Card>
 
-              {/* Receivables - Keep original calculation as it's not transaction-based */}
+              {/* Receivables */}
               <Card className="bg-[#a855f7] text-white">
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
@@ -1253,11 +1338,11 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <div className="text-lg font-bold">
                     {`${currency} ${(financialData?.accountsReceivable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.receivables || []).length} outstanding</div>
+                  <div className="text-[10px] mt-1">{(financialData?.receivables || []).length} pending</div>
                 </CardContent>
               </Card>
 
-              {/* Payables - Keep original calculation as it's not transaction-based */}
+              {/* Payables */}
               <Card className="bg-[#eab308] text-white">
                 <CardContent className="p-3">
                   <div className="flex items-center gap-1 mb-1">
@@ -1267,7 +1352,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <div className="text-lg font-bold">
                     {`${currency} ${(financialData?.accountsPayable || 0).toFixed(2)}`}
                   </div>
-                  <div className="text-[10px] mt-1">{(financialData?.payables || []).length} outstanding</div>
+                  <div className="text-[10px] mt-1">{(financialData?.payables || []).length} pending</div>
                 </CardContent>
               </Card>
             </>
@@ -1311,14 +1396,17 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 {filteredTransactions.map((transaction) => {
                   const dateTime = formatDateTime(transaction.date)
                   const netImpact = getNetImpact(transaction)
-                  const isPositive = netImpact >= 0
+                  const isPositive = netImpact > 0
+                  const isNegative = netImpact < 0
+                  const remainingAmount = getRemainingAmount(transaction)
+                  const moneyFlow = getMoneyFlowDisplay(transaction)
 
                   // Determine transaction type and extract the correct ID
                   const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
                   const isPurchase = transaction.type === "purchase" || transaction.description?.toLowerCase().startsWith("purchase")
                   const isManual = transaction.type === "manual" || transaction.description?.toLowerCase().includes("manual")
-                  const isSupplierPayment = transaction.type === "supplier_payment" || 
-                                           transaction.description?.toLowerCase().includes("supplier payment")
+                  const isSupplierPayment = transaction.type === 'supplier_payment' || 
+                                           transaction.description?.toLowerCase().includes('supplier payment')
                   
                   const handleClick = () => {
                     if (isSale) {
@@ -1363,7 +1451,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-3">
                           <div className="text-gray-500 dark:text-gray-400">
-                            <Clock className="h-4 w-4" />
+                            {getTransactionTypeIcon(transaction.type)}
                           </div>
                           <div>
                             <div className="font-medium text-gray-900 dark:text-gray-100">
@@ -1382,50 +1470,56 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                         </div>
 
                         <div className="flex items-center gap-6">
+                          {/* FIXED: Corrected Money Flow display */}
                           <div className="grid grid-cols-4 gap-4 text-sm">
                             <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Amount</div>
-                              <div className="text-gray-900 dark:text-gray-100">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Transaction Amount</div>
+                              <div className="text-gray-900 dark:text-gray-100 font-medium">
                                 {currency} {transaction.amount.toFixed(2)}
                               </div>
                             </div>
                             <div className="text-right">
                               <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {getNetImpact(transaction) >= 0 ? "Received" : "Spend"}
+                                {moneyFlow.text}
                               </div>
-                              <div
-                                className={
-                                  getNetImpact(transaction) >= 0
-                                    ? "text-green-600 dark:text-green-400"
-                                    : "text-red-600 dark:text-red-400"
+                              <div className={`font-medium ${moneyFlow.color}`}>
+                                {moneyFlow.showAmount 
+                                  ? `${currency} ${moneyFlow.value.toFixed(2)}`
+                                  : moneyFlow.text
                                 }
-                              >
-                                {currency}{" "}
-                                {getNetImpact(transaction) >= 0
-                                  ? transaction.credit.toFixed(2)
-                                  : Math.abs(transaction.debit || transaction.amount).toFixed(2)}
+                              </div>
+                            </div>
+                            {/* Remaining column for credit sales */}
+                            <div className="text-right">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
+                              <div className={
+                                remainingAmount > 0 
+                                  ? "text-yellow-600 dark:text-yellow-400 font-medium" 
+                                  : "text-gray-400 dark:text-gray-500 font-medium"
+                              }>
+                                {currency} {remainingAmount.toFixed(2)}
                               </div>
                             </div>
                             <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Cost</div>
-                              <div className="text-orange-600 dark:text-orange-400">
+                              <div className="text-xs text-gray-500 dark:text-gray-400">Product Cost (COGS)</div>
+                              <div className="text-orange-600 dark:text-orange-400 font-medium">
                                 {currency} {transaction.cost.toFixed(2)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Credit/Debit</div>
-                              <div className="text-blue-600 dark:text-blue-400">
-                                {currency} {transaction.credit.toFixed(2)} / {currency} {transaction.debit.toFixed(2)}
                               </div>
                             </div>
                           </div>
 
                           <div className="min-w-[120px] text-right">
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Net Impact</div>
+                            <div className="text-xs text-gray-500 dark:text-gray-400">Cash Impact</div>
                             <div
-                              className={`font-bold ${isPositive ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400"}`}
+                              className={`font-bold text-base ${
+                                isPositive 
+                                  ? "text-green-600 dark:text-green-400" 
+                                  : isNegative 
+                                    ? "text-red-600 dark:text-red-400" 
+                                    : "text-gray-600 dark:text-gray-400"
+                              }`}
                             >
-                              {isPositive ? "" : "- "}
+                              {isPositive ? "+" : isNegative ? "-" : ""}
                               {currency} {Math.abs(netImpact).toFixed(2)}
                             </div>
                           </div>
@@ -1721,8 +1815,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   <SelectValue placeholder="Select type" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="debit">Debit (Money Out)</SelectItem>
-                  <SelectItem value="credit">Credit (Money In)</SelectItem>
+                  <SelectItem value="debit">Money Out (Debit)</SelectItem>
+                  <SelectItem value="credit">Money In (Credit)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
