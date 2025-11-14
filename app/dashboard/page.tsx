@@ -14,7 +14,7 @@ export default function DashboardPage() {
   const router = useRouter()
 
   useEffect(() => {
-    // Load saved data from localStorage ----
+    // Load saved data from localStorage
     dispatch(loadFromStorage())
     
     // Small delay to ensure Redux hydration
