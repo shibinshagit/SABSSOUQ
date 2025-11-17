@@ -251,4 +251,3 @@ export const selectSalesNeedsRefresh = (state: { sales: SalesState }) => state.s
 export const selectSalesSilentRefreshing = (state: { sales: SalesState }) => state.sales.isSilentRefreshing
 
 export default salesSlice.reducer
-

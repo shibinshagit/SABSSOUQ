@@ -299,4 +299,3 @@ export const selectIsLoading = (state: RootState) => state.accounting.isLoading
 export const selectIsBackgroundLoading = (state: RootState) => state.accounting.isBackgroundLoading
 
 export default accountingSlice.reducer
-
