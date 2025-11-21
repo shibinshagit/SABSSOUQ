@@ -330,8 +330,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const loadAccountingBalances = async (fromDate: Date, toDate: Date) => {
     try {
       console.log("Loading accounting balances for date range:", {
-        from: format(fromDate, "yyyy-MM-dd"),
-        to: format(toDate, "yyyy-MM-dd"),
+        from: format(fromDate, "yyyy-MM-dd HH:mm:ss"),
+        to: format(toDate, "yyyy-MM-dd HH:mm:ss"),
       })
 
       if (!deviceId) {
@@ -339,22 +339,42 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      const dayBeforeFrom = new Date(
+      const startOfFromDate = new Date(
         fromDate.getFullYear(),
         fromDate.getMonth(),
-        fromDate.getDate() - 1,
+        fromDate.getDate(),
+        0,
+        0,
+        0,
+        0
+      )
+
+      const endOfToDate = new Date(
+        toDate.getFullYear(),
+        toDate.getMonth(),
+        toDate.getDate(),
         23,
         59,
         59,
-        999,
+        999
       )
 
-      const endOfToDate = new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate(), 23, 59, 59, 999)
+      console.log("Fetching balances with dates:", {
+        start: format(startOfFromDate, "yyyy-MM-dd HH:mm:ss"),
+        end: format(endOfToDate, "yyyy-MM-dd HH:mm:ss"),
+      })
 
-      const balanceData = await getAccountingBalances(deviceId, dayBeforeFrom, endOfToDate)
+      const balanceData = await getAccountingBalances(deviceId, startOfFromDate, endOfToDate)
       dispatch(setBalances(balanceData))
 
-      console.log("Balances loaded for date range:", balanceData)
+      console.log("Balances loaded successfully:", {
+        openingBalance: balanceData.openingBalance,
+        closingBalance: balanceData.closingBalance,
+        periodCredits: balanceData.periodCredits,
+        periodDebits: balanceData.periodDebits,
+        periodNet: balanceData.periodNet,
+        dateRange: `${format(startOfFromDate, "MMM dd")} - ${format(endOfToDate, "MMM dd")}`
+      })
     } catch (error) {
       console.error("Error loading accounting balances:", error)
       toast.error("Failed to load account balances")
@@ -370,6 +390,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       
       await new Promise(resolve => setTimeout(resolve, 100))
       
+      // Load financial data and balances
       await loadFinancialData(false)
       await loadAccountingBalances(dateFrom, dateTo)
       
@@ -385,8 +406,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   // Initial load and date change effect
   useEffect(() => {
     if (deviceId) {
+      // Load balances with actual date range
       loadAccountingBalances(dateFrom, dateTo)
 
+      // Check if we need to refresh financial data
       if (
         financialData &&
         lastUpdated &&
@@ -693,7 +716,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
               </div>
               <div class="summary-card">
                 <h3>Gross Profit</h3>
-                <div class="value">${currency} ${getProfit().toFixed(2)}</div>
+                <div class="value">${currency} ${getTotalProfit().toFixed(2)}</div>
               </div>
               <div class="summary-card">
                 <h3>Money In</h3>
@@ -735,6 +758,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   .map((t) => {
                     const dateTime = formatDateTime(t.date)
                     const netImpact = getNetImpact(t)
+                    const cashImpact = getCashImpact(t)
                     const moneyFlow = getMoneyFlowDisplay(t)
                     return `
                     <tr>
@@ -747,8 +771,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                         ${moneyFlow.showAmount ? (netImpact >= 0 ? "+" : "-") + currency + " " + moneyFlow.value.toFixed(2) : moneyFlow.text}
                       </td>
                       <td>${currency} ${t.cost.toFixed(2)}</td>
-                      <td style="color: ${netImpact > 0 ? "#059669" : netImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
-                        ${netImpact > 0 ? "+" : netImpact < 0 ? "-" : ""}${currency} ${Math.abs(netImpact).toFixed(2)}
+                      <td style="color: ${cashImpact > 0 ? "#059669" : cashImpact < 0 ? "#dc2626" : "#6b7280"}; font-weight: bold;">
+                        ${cashImpact > 0 ? "+" : cashImpact < 0 ? "-" : ""}${currency} ${Math.abs(cashImpact).toFixed(2)}
                       </td>
                     </tr>
                   `
@@ -779,317 +803,760 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     }
   }
 
-  // Helper function to extract ID from description
-  const extractIdFromDescription = (desc: string) => {
-    if (!desc) return null
-    const match = desc.match(/#(\d+)/)
-    return match ? parseInt(match[1]) : null
-  }
+const extractIdFromDescription = (desc: string) => {
+  if (!desc) return null
+  const match = desc.match(/#(\d+)/)
+  return match ? parseInt(match[1]) : null
+}
 
-  // FIXED: Calculate remaining amount for credit sales and purchases - handle partial payments
-  const getRemainingAmount = (transaction: any) => {
-    const status = transaction.status?.toLowerCase()
+const n = (v: any) => Number(v) || 0
+
+// Define filteredTransactions first with proper null checks
+// Define filteredTransactions first with proper null checks
+const filteredTransactions =
+  financialData?.transactions?.filter((transaction) => {
+    if (!transaction) return false
+    
+    const description = transaction.description || ""
+    const account = transaction.account || ""
+
+    const matchesSearch =
+      description.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      account.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (transaction.status && transaction.status.toLowerCase().includes(searchTerm.toLowerCase()))
+
+    let matchesType = true
     const type = transaction.type?.toLowerCase()
-    const totalAmount = Number(transaction.amount) || 0
-    const receivedAmount = Number(transaction.received) || 0
+    const received = n(transaction.received)
     
-    // For credit sales, remaining = total amount - received amount
-    if (status === 'credit' && type === 'sale') {
-      const remaining = totalAmount - receivedAmount
-      return Math.max(0, remaining)
+    if (filterType === "income") {
+      matchesType = (type === 'sale' && received > 0) || (type === 'adjustment' && received > 0)
+    } else if (filterType === "expense") {
+      // FIXED: Include purchase adjustments for expense filter
+      matchesType = (type === 'purchase' && received > 0) || 
+                   (type === 'supplier_payment') ||
+                   (type === 'adjustment' && description.includes('Purchase') && received > 0)
+    } else if (filterType === "sale") {
+      matchesType = type === "sale" || description.toLowerCase().startsWith("sale")
+    } else if (filterType === "purchase") {
+      // FIXED: Include purchase adjustments for purchase filter
+      matchesType = type === "purchase" || 
+                   description.toLowerCase().startsWith("purchase") ||
+                   (type === 'adjustment' && description.includes('Purchase'))
+    } else if (filterType !== "all") {
+      matchesType = transaction.type === filterType
+    }
+
+    let transactionDate: Date
+
+    if (transaction.date instanceof Date) {
+      transactionDate = transaction.date
+    } else if (typeof transaction.date === "string") {
+      transactionDate = parseISO(transaction.date)
+    } else {
+      return false
+    }
+
+    if (!isValid(transactionDate)) {
+      return false
+    }
+
+    const transactionDateOnly = new Date(
+      transactionDate.getFullYear(),
+      transactionDate.getMonth(),
+      transactionDate.getDate(),
+    )
+    const fromDateOnly = new Date(dateFrom.getFullYear(), dateFrom.getMonth(), dateFrom.getDate())
+    const toDateOnly = new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate())
+
+    const isWithinDateRange = transactionDateOnly >= fromDateOnly && transactionDateOnly <= toDateOnly
+
+    return matchesSearch && matchesType && isWithinDateRange
+  }) || []
+
+
+const isDataLoading = isLoading && !financialData
+
+// FIXED: Profit calculation with proportional cost for partial payments
+// FIXED: Profit calculation - ONLY includes sales profit, excludes purchases
+// FIXED: Profit calculation - purchase adjustments should not affect profit
+const getProfit = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const received = n(transaction.received)
+  const cost = n(transaction.cost)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  
+  // For sales - profit = money received - cost
+  if (type === 'sale') {
+    return received - cost
+  }
+  
+  // For sale adjustments (additional payments)
+  if (type === 'adjustment' && description.includes('Sale')) {
+    const additionalMoneyIn = received || credit
+    const saleId = extractIdFromDescription(description)
+    
+    if (saleId) {
+      // Find the original sale
+      const originalSale = financialData?.transactions?.find(
+        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+      )
+      
+      if (originalSale) {
+        const totalBill = n(originalSale.amount)
+        const alreadyReceived = n(originalSale.received)
+        const originalCost = n(originalSale.cost)
+        
+        // EXTRACT COGS from description if available
+        let extractedCost = 0
+        const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+        if (costMatch) {
+          extractedCost = n(costMatch[1])
+        }
+        
+        // If we have extracted COGS from description, use that
+        if (extractedCost > 0) {
+          return additionalMoneyIn - extractedCost
+        }
+        
+        // If original sale has cost, use proportional calculation
+        if (originalCost > 0 && alreadyReceived > 0) {
+          const costPerMoneyUnit = originalCost / alreadyReceived
+          const costForThisPayment = additionalMoneyIn * costPerMoneyUnit
+          return additionalMoneyIn - costForThisPayment
+        }
+        
+        // If no cost data available, assume 50% profit margin
+        return additionalMoneyIn * 0.5
+      }
     }
     
-    // For credit purchases, remaining = total amount - received amount
-    if (status === 'credit' && type === 'purchase') {
-      const remaining = totalAmount - receivedAmount
-      return Math.max(0, remaining)
+    // If no original sale found, try to extract COGS from description
+    const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+    if (costMatch) {
+      const extractedCost = n(costMatch[1])
+      return additionalMoneyIn - extractedCost
     }
     
-    // For completed sales with partial payment (edge case)
-    if (status === 'completed' && receivedAmount < totalAmount) {
-      const remaining = totalAmount - receivedAmount
-      return Math.max(0, remaining)
-    }
-    
+    // Final fallback: assume 50% profit margin
+    return additionalMoneyIn * 0.5
+  }
+  
+  // For purchases - NO PROFIT IMPACT (purchases don't affect profit, only cash)
+  if (type === 'purchase') {
     return 0
   }
-
-  // FIXED: Get net impact with PROPER credit purchase handling
-  const getNetImpact = (transaction: any) => {
-    const type = transaction.type?.toLowerCase()
-    const debitAmount = Number(transaction.debit) || 0
-    const creditAmount = Number(transaction.credit) || 0
-    
-    // FIXED: For purchase adjustments: net impact = credit - debit
-    if (type === 'adjustment' && transaction.description?.includes('Purchase')) {
-      return creditAmount - debitAmount
-    }
-    
-    // For supplier payments, cash impact is negative
-    if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
-      return -Math.abs(debitAmount)
-    }
-    
-    // FIXED: For credit purchases - cash impact = -debit (money out) + credit (refunds)
-    if (type === 'purchase') {
-      return creditAmount - debitAmount
-    }
-    
-    // Default calculation for other transactions
-    return creditAmount - debitAmount
+  
+  // For purchase adjustments - NO PROFIT IMPACT (only cash impact)
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    return 0 // Purchase adjustments don't affect profit
   }
+  
+  // For supplier payments - NO PROFIT IMPACT
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return 0
+  }
+  
+  // Default for other transactions
+  return credit - debit
+}
 
-  // FIXED: Enhanced money flow display for purchase adjustments and credit purchases
-  const getMoneyFlowDisplay = (transaction: any) => {
-    const type = transaction.type?.toLowerCase()
-    const netImpact = getNetImpact(transaction)
-    const debitAmount = Number(transaction.debit) || 0
-    const creditAmount = Number(transaction.credit) || 0
+
+// FIXED: Cash Impact - includes both sales profit AND purchase outflows
+// FIXED: Cash Impact for purchase adjustments - handle backend data structure
+const getCashImpact = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const received = n(transaction.received)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  const cost = n(transaction.cost)
+  
+  // For sales - cash impact = profit only (received - cost)
+  if (type === 'sale') {
+    return received - cost
+  }
+  
+  // For sale adjustments - cash impact = profit only (received - proportional cost)
+  if (type === 'adjustment' && description.includes('Sale')) {
+    const additionalMoneyIn = received || credit
+    const saleId = extractIdFromDescription(description)
     
-    // FIXED: Handle purchase adjustments with proper labeling
-    if (type === 'adjustment' && transaction.description?.includes('Purchase')) {
-      if (debitAmount > 0 && creditAmount === 0) {
-        return {
-          text: "Additional Payment",
-          color: "text-red-600 dark:text-red-400",
-          value: debitAmount,
-          showAmount: true
-        }
-      } else if (creditAmount > 0 && debitAmount === 0) {
-        return {
-          text: "Refund Received",
-          color: "text-green-600 dark:text-green-400",
-          value: creditAmount,
-          showAmount: true
-        }
-      } else if (debitAmount > 0 && creditAmount > 0) {
-        // Complex adjustment with both debit and credit
-        return {
-          text: "Net Adjustment",
-          color: netImpact >= 0 ? "text-green-600 dark:text-green-400" : "text-red-600 dark:text-red-400",
-          value: Math.abs(netImpact),
-          showAmount: true
-        }
-      }
-    }
-    
-    // FIXED: For credit purchases - show actual payment status
-    if (type === 'purchase' && transaction.status?.toLowerCase() === 'credit') {
-      const totalAmount = Number(transaction.amount) || 0
-      const receivedAmount = Number(transaction.received) || 0
-      const remaining = Math.max(0, totalAmount - receivedAmount)
+    if (saleId) {
+      // Find the original sale
+      const originalSale = financialData?.transactions?.find(
+        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+      )
       
-      if (receivedAmount > 0) {
-        return {
-          text: "Partial Payment",
-          color: "text-orange-600 dark:text-orange-400",
-          value: receivedAmount,
-          showAmount: true
+      if (originalSale) {
+        const totalBill = n(originalSale.amount)
+        const alreadyReceived = n(originalSale.received)
+        const originalCost = n(originalSale.cost)
+        
+        // EXTRACT COGS from description if available
+        let extractedCost = 0
+        const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+        if (costMatch) {
+          extractedCost = n(costMatch[1])
         }
-      } else {
-        return {
-          text: "No Payment",
-          color: "text-yellow-600 dark:text-yellow-400",
-          value: 0,
-          showAmount: false
+        
+        // If we have extracted COGS from description, use that
+        if (extractedCost > 0) {
+          return additionalMoneyIn - extractedCost
         }
+        
+        // If original sale has cost, use proportional calculation
+        if (originalCost > 0 && alreadyReceived > 0) {
+          const costPerMoneyUnit = originalCost / alreadyReceived
+          const costForThisPayment = additionalMoneyIn * costPerMoneyUnit
+          return additionalMoneyIn - costForThisPayment
+        }
+        
+        // If no cost data available, assume 50% profit margin
+        return additionalMoneyIn * 0.5
       }
     }
     
-    if (netImpact > 0) {
-      return {
-        text: "Money In",
-        color: "text-green-600 dark:text-green-400",
-        value: transaction.credit || transaction.received,
-        showAmount: true
+    // If no original sale found, try to extract COGS from description
+    const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+    if (costMatch) {
+      const extractedCost = n(costMatch[1])
+      return additionalMoneyIn - extractedCost
+    }
+    
+    // Final fallback: assume 50% profit margin
+    return additionalMoneyIn * 0.5
+  }
+  
+  // For purchases - cash impact is full amount spent (negative)
+  if (type === 'purchase') {
+    return -received
+  }
+  
+  // For purchase adjustments - cash impact is money paid out (negative)
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    // If debit amount is available, use it (money going out)
+    if (debit > 0) {
+      return -debit
+    }
+    // If received amount is available, use it
+    else if (received > 0) {
+      return -received
+    }
+    // Extract payment amount from description as fallback
+    else {
+      const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i) || 
+                          description.match(/paid.*?([\d.]+)/i)
+      if (paymentMatch) {
+        const paymentAmount = n(paymentMatch[1])
+        return -paymentAmount
       }
-    } else if (netImpact < 0) {
+    }
+    return 0
+  }
+  
+  // For purchase adjustments with "Edited" in description - extract payment amount
+  if (type === 'adjustment' && description.includes('Edited') && description.includes('Payment increased by')) {
+    const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i)
+    if (paymentMatch) {
+      const paymentAmount = n(paymentMatch[1])
+      return -paymentAmount // Negative because it's money going out
+    }
+  }
+  
+  // For supplier payments - cash impact is full amount paid out (negative)
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return -Math.abs(debit)
+  }
+  
+  // For manual/other transactions - cash impact = actual net money movement
+  return credit - debit
+}
+
+
+
+
+// FIXED: Total Cash Impact
+const getTotalCashImpact = () => {
+  if (!filteredTransactions) return 0
+
+  let totalCashImpact = 0
+
+  filteredTransactions.forEach((t) => {
+    if (t) {
+      totalCashImpact += getCashImpact(t)
+    }
+  })
+
+  return totalCashImpact
+}
+
+
+// FIXED: Money flow display based on corrected profit calculation
+const getMoneyFlowDisplay = (transaction: any) => {
+  if (!transaction) {
+    return {
+      text: "Invalid Transaction",
+      color: "text-gray-600 dark:text-gray-400",
+      value: 0,
+      showAmount: false
+    }
+  }
+  
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const profit = getProfit(transaction)
+  const received = n(transaction.received)
+  const totalAmount = n(transaction.amount)
+  
+  // --- SALE TRANSACTIONS ---
+  if (type === 'sale') {
+    if (received === 0) {
       return {
-        text: "Money Out",
-        color: "text-red-600 dark:text-red-400",
-        value: Math.abs(transaction.debit),
-        showAmount: true
-      }
-    } else {
-      return {
-        text: "No Cash Impact",
-        color: "text-gray-600 dark:text-gray-400",
+        text: "Credit Sale",
+        color: "text-blue-600 dark:text-blue-400",
         value: 0,
         showAmount: false
       }
     }
-  }
-
-  // FIXED: Get actual money spent (only NET cash outflows after refunds)
-  const getSpends = () => {
-    return filteredTransactions?.reduce((sum, t) => {
-      const type = t.type?.toLowerCase()
-      const debitAmount = Number(t.debit) || 0
-      const creditAmount = Number(t.credit) || 0
-      
-      // FIXED: For credit purchases and adjustments, track ACTUAL cash movements
-      if (type === 'purchase') {
-        // For original purchase transactions: debit = money out
-        return sum + debitAmount
-      } else if (type === 'adjustment' && t.description?.includes('Purchase')) {
-        // FIXED: Purchase adjustments - debit increases spending, credit reduces spending
-        const netAdjustment = debitAmount - creditAmount
-        return sum + netAdjustment
-      } else {
-        // For other transaction types
-        const netDebit = debitAmount - creditAmount
-        return netDebit > 0 ? sum + netDebit : sum
+    
+    if (received < totalAmount) {
+      return {
+        text: "Partial Payment - Profit",
+        color: "text-green-600 dark:text-green-400",
+        value: profit > 0 ? profit : 0,
+        showAmount: true
       }
-    }, 0) || 0
-  }
-
-  // FIXED: Get actual money received (only NET cash inflows)
-  const getAmountReceived = () => {
-    return filteredTransactions?.reduce((sum, t) => {
-      const type = t.type?.toLowerCase()
-      const debitAmount = Number(t.debit) || 0
-      const creditAmount = Number(t.credit) || 0
-      
-      // FIXED: For purchase adjustments, credits are refunds (money in)
-      if (type === 'adjustment' && t.description?.includes('Purchase') && creditAmount > 0) {
-        return sum + creditAmount
+    }
+    
+    if (profit > 0) {
+      return {
+        text: "Profit",
+        color: "text-green-600 dark:text-green-400",
+        value: profit,
+        showAmount: true
       }
-      
-      // For sales and other credit transactions
-      return sum + creditAmount
-    }, 0) || 0
-  }
-
-  // Enhanced filtering with income/expense and proper date comparison
-  const filteredTransactions =
-    financialData?.transactions?.filter((transaction) => {
-      const description = transaction.description || ""
-      const account = transaction.account || ""
-
-      const matchesSearch =
-        description.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        account.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        transaction.status.toLowerCase().includes(searchTerm.toLowerCase())
-
-      let matchesType = true
-      const netImpact = getNetImpact(transaction)
-
-      if (filterType === "income") {
-        matchesType = netImpact > 0
-      } else if (filterType === "expense") {
-        matchesType = netImpact < 0
-      } else if (filterType === "sale") {
-        matchesType = transaction.type === "sale" || description.toLowerCase().startsWith("sale")
-      } else if (filterType === "purchase") {
-        matchesType = transaction.type === "purchase" || description.toLowerCase().startsWith("purchase")
-      } else if (filterType !== "all") {
-        matchesType = transaction.type === filterType
+    } else if (profit === 0) {
+      return {
+        text: "Break Even",
+        color: "text-gray-600 dark:text-gray-400",
+        value: 0,
+        showAmount: false
       }
-
-      let transactionDate: Date
-
-      if (transaction.date instanceof Date) {
-        transactionDate = transaction.date
-      } else if (typeof transaction.date === "string") {
-        transactionDate = parseISO(transaction.date)
-      } else {
-        return false
+    } else {
+      return {
+        text: "Loss",
+        color: "text-red-600 dark:text-red-400",
+        value: Math.abs(profit),
+        showAmount: true
       }
-
-      if (!isValid(transactionDate)) {
-        return false
-      }
-
-      const transactionDateOnly = new Date(
-        transactionDate.getFullYear(),
-        transactionDate.getMonth(),
-        transactionDate.getDate(),
-      )
-      const fromDateOnly = new Date(dateFrom.getFullYear(), dateFrom.getMonth(), dateFrom.getDate())
-      const toDateOnly = new Date(dateTo.getFullYear(), dateTo.getMonth(), dateTo.getDate())
-
-      const isWithinDateRange = transactionDateOnly >= fromDateOnly && transactionDateOnly <= toDateOnly
-
-      return matchesSearch && matchesType && isWithinDateRange
-    }) || []
-
-  const isDataLoading = isLoading && !financialData
-
-  // Calculate specific metrics based on FILTERED data
-  const getSalesTotal = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return t.type === "sale" || t.description?.toLowerCase().startsWith("sale") ? sum + t.amount : sum
-      }, 0) || 0
-    )
-  }
-
-  const getPurchasesTotal = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return t.type === "purchase" || t.description?.toLowerCase().startsWith("purchase") ? sum + t.amount : sum
-      }, 0) || 0
-    )
-  }
-
-  const getProfit = () => {
-    const filteredCogs =
-      filteredTransactions?.reduce((sum, t) => {
-        return t.type === "sale" || t.description?.toLowerCase().startsWith("sale") ? sum + t.cost : sum
-      }, 0) || 0
-
-    return getSalesTotal() - filteredCogs
-  }
-
-  const getFilteredCogs = () => {
-    return (
-      filteredTransactions?.reduce((sum, t) => {
-        return sum + t.cost
-      }, 0) || 0
-    )
-  }
-
-  // FIXED BALANCE CALCULATIONS - Only actual cash movements
-  const getOpeningBalance = () => {
-    return balances?.openingBalance || 0
-  }
-
-  const getClosingBalance = () => {
-    return balances?.closingBalance || getOpeningBalance() + (getAmountReceived() - getSpends())
-  }
-
-  const getTransactionTypeIcon = (type: string) => {
-    switch (type?.toLowerCase()) {
-      case "sale":
-        return <ShoppingCart className="h-4 w-4" />
-      case "purchase":
-        return <Package className="h-4 w-4" />
-      default:
-        return <Clock className="h-4 w-4" />
     }
   }
-
-  const formatDate = (date: Date) => {
-    return format(date, "M/d/yyyy")
+  
+  // --- SALE ADJUSTMENTS ---
+  if (type === 'adjustment' && description.includes('Sale')) {
+    if (profit > 0) {
+      return {
+        text: "Additional Profit",
+        color: "text-green-600 dark:text-green-400",
+        value: profit,
+        showAmount: true
+      }
+    } else if (profit < 0) {
+      return {
+        text: "Additional Loss",
+        color: "text-red-600 dark:text-red-400",
+        value: Math.abs(profit),
+        showAmount: true
+      }
+    } else {
+      return {
+        text: "Additional Payment",
+        color: "text-blue-600 dark:text-blue-400",
+        value: n(transaction.received) || n(transaction.credit),
+        showAmount: true
+      }
+    }
   }
-
-  const setToday = () => {
-    const today = new Date()
-    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
-
-    handleDateFromChange(todayStart)
-    handleDateToChange(todayEnd)
+  
+  // --- PURCHASE TRANSACTIONS ---
+  if (type === 'purchase') {
+    const paid = n(transaction.received)
+    const totalBill = n(transaction.amount)
+    
+    if (paid === 0) {
+      return {
+        text: "Credit Purchase",
+        color: "text-blue-600 dark:text-blue-400",
+        value: 0,
+        showAmount: false
+      }
+    }
+    
+    if (paid > 0 && paid < totalBill) {
+      return {
+        text: "Partial Payment",
+        color: "text-orange-600 dark:text-orange-400",
+        value: paid,
+        showAmount: true
+      }
+    }
+    
+    return {
+      text: "Full Payment",
+      color: "text-red-600 dark:text-red-400",
+      value: paid,
+      showAmount: true
+    }
   }
-
-  const setLastWeek = () => {
-    const today = new Date()
-    const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 })
-    const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
-
-    handleDateFromChange(lastWeekStart)
-    handleDateToChange(todayEnd)
+  
+  // --- PURCHASE ADJUSTMENTS ---
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    if (profit > 0) {
+      return {
+        text: "Refund Received",
+        color: "text-green-600 dark:text-green-400",
+        value: profit,
+        showAmount: true
+      }
+    }
   }
+  
+  // --- SUPPLIER PAYMENTS ---
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return {
+      text: "Supplier Payment",
+      color: "text-red-600 dark:text-red-400",
+      value: Math.abs(profit),
+      showAmount: true
+    }
+  }
+  
+  // --- GENERIC CASES ---
+  if (profit > 0) {
+    return {
+      text: "Money In",
+      color: "text-green-600 dark:text-green-400",
+      value: profit,
+      showAmount: true
+    }
+  } else if (profit < 0) {
+    return {
+      text: "Money Out",
+      color: "text-red-600 dark:text-red-400",
+      value: Math.abs(profit),
+      showAmount: true
+    }
+  } else {
+    return {
+      text: "No Cash Impact",
+      color: "text-gray-600 dark:text-gray-400",
+      value: 0,
+      showAmount: false
+    }
+  }
+}
+
+// ADDED: Get filtered COGS (Cost of Goods Sold)
+const getFilteredCogs = () => {
+  if (!filteredTransactions) return 0
+
+  const cogsMap = new Map()
+  let totalCogs = 0
+
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const type = t.type?.toLowerCase()
+    const saleId = t.sale_id
+    const description = t.description || ""
+    
+    // For sales, only count cost once per sale_id to avoid double counting
+    if (type === 'sale' && saleId) {
+      if (!cogsMap.has(saleId)) {
+        cogsMap.set(saleId, n(t.cost))
+        totalCogs += n(t.cost)
+      }
+    }
+    // For adjustments, extract COGS from description if available
+    else if (type === 'adjustment' && description.includes('Sale')) {
+      const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+      if (costMatch) {
+        const extractedCost = n(costMatch[1])
+        totalCogs += extractedCost
+      }
+    }
+    // For other transaction types, add their cost
+    else {
+      totalCogs += n(t.cost)
+    }
+  })
+
+  return totalCogs
+}
+
+// Calculate remaining amount for credit sales and purchases
+// FIXED: Calculate remaining amount for credit sales and purchases including adjustments
+// FIXED: Calculate remaining amount for both sales AND purchases including adjustments
+const getRemainingAmount = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const status = transaction.status?.toLowerCase()
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const totalAmount = n(transaction.amount)
+  const receivedAmount = n(transaction.received)
+  
+  // For sale adjustments - calculate remaining based on original sale
+  if (type === 'adjustment' && description.includes('Sale')) {
+    const saleId = extractIdFromDescription(description)
+    
+    if (saleId) {
+      // Find the original sale
+      const originalSale = financialData?.transactions?.find(
+        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+      )
+      
+      if (originalSale) {
+        const originalTotal = n(originalSale.amount)
+        const originalReceived = n(originalSale.received)
+        
+        // Find all adjustments for this sale to calculate total received so far
+        const saleAdjustments = financialData?.transactions?.filter(
+          t => t && t.type?.toLowerCase() === 'adjustment' && 
+               t.description?.includes(`#${saleId}`) &&
+               t !== transaction // Exclude current transaction
+        ) || []
+        
+        let totalReceivedSoFar = originalReceived
+        saleAdjustments.forEach(adj => {
+          totalReceivedSoFar += n(adj.received) || n(adj.credit)
+        })
+        
+        // Add current transaction amount
+        const currentAmount = n(transaction.received) || n(transaction.credit)
+        totalReceivedSoFar += currentAmount
+        
+        const remaining = Math.max(0, originalTotal - totalReceivedSoFar)
+        return remaining
+      }
+    }
+    return 0
+  }
+  
+  // For purchase adjustments - calculate remaining based on original purchase
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    const purchaseId = extractIdFromDescription(description)
+    
+    if (purchaseId) {
+      // Find the original purchase
+      const originalPurchase = financialData?.transactions?.find(
+        st => st && st.purchase_id === purchaseId && st.type?.toLowerCase() === 'purchase'
+      )
+      
+      if (originalPurchase) {
+        const originalTotal = n(originalPurchase.amount)
+        const originalPaid = n(originalPurchase.received)
+        
+        // Find all adjustments for this purchase to calculate total paid so far
+        const purchaseAdjustments = financialData?.transactions?.filter(
+          t => t && t.type?.toLowerCase() === 'adjustment' && 
+               t.description?.includes(`#${purchaseId}`) &&
+               t !== transaction // Exclude current transaction
+        ) || []
+        
+        let totalPaidSoFar = originalPaid
+        purchaseAdjustments.forEach(adj => {
+          totalPaidSoFar += n(adj.received) || n(adj.debit)
+        })
+        
+        // Add current transaction amount
+        const currentAmount = n(transaction.received) || n(transaction.debit)
+        totalPaidSoFar += currentAmount
+        
+        const remaining = Math.max(0, originalTotal - totalPaidSoFar)
+        console.log(`Purchase adjustment remaining calculation for #${purchaseId}:`, {
+          originalTotal,
+          originalPaid,
+          adjustmentsCount: purchaseAdjustments.length,
+          currentAmount,
+          totalPaidSoFar,
+          remaining
+        })
+        
+        return remaining
+      }
+    }
+    return 0
+  }
+  
+  // For regular credit sales, remaining = total amount - received amount
+  if (status === 'credit' && type === 'sale') {
+    return Math.max(0, totalAmount - receivedAmount)
+  }
+  
+  // For credit purchases, remaining = total amount - received amount
+  if (status === 'credit' && type === 'purchase') {
+    return Math.max(0, totalAmount - receivedAmount)
+  }
+  
+  // For completed sales with partial payment
+  if (status === 'completed' && receivedAmount < totalAmount) {
+    return Math.max(0, totalAmount - receivedAmount)
+  }
+  
+  // For paid purchases with partial payment
+  if (status === 'paid' && receivedAmount < totalAmount) {
+    return Math.max(0, totalAmount - receivedAmount)
+  }
+  
+  return 0
+}
+
+
+
+// Get actual money received (only NET cash inflows)
+const getAmountReceived = () => {
+  if (!filteredTransactions) return 0
+  
+  let totalReceived = 0
+
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const cashImpact = getCashImpact(t)
+    if (cashImpact > 0) {
+      totalReceived += cashImpact
+    }
+  })
+
+  return totalReceived
+}
+
+// Get spends (money out)
+const getSpends = () => {
+  if (!filteredTransactions) return 0
+  
+  let totalSpends = 0
+
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const cashImpact = getCashImpact(t)
+    if (cashImpact < 0) {
+      totalSpends += Math.abs(cashImpact)
+    }
+  })
+
+  return totalSpends
+}
+
+// Calculate sales total
+const getSalesTotal = () => {
+  if (!financialData?.transactions) return 0
+  
+  const saleMap = new Map()
+  
+  financialData.transactions.forEach((t) => {
+    if (t && t.type === 'sale' && t.sale_id) {
+      saleMap.set(t.sale_id, t.amount)
+    }
+  })
+  
+  let total = 0
+  saleMap.forEach((amount) => {
+    total += amount
+  })
+  
+  return total
+}
+
+const getPurchasesTotal = () => {
+  if (!financialData?.transactions) return 0
+  
+  const purchaseMap = new Map()
+  
+  financialData.transactions.forEach((t) => {
+    if (t && t.type === 'purchase' && t.purchase_id) {
+      purchaseMap.set(t.purchase_id, t.amount)
+    }
+  })
+  
+  let total = 0
+  purchaseMap.forEach((amount) => {
+    total += amount
+  })
+  
+  return total
+}
+
+const getTotalProfit = () => {
+  if (!filteredTransactions) return 0
+
+  let totalProfit = 0
+
+  filteredTransactions.forEach((t) => {
+    if (t) {
+      totalProfit += getProfit(t)
+    }
+  })
+
+  return totalProfit
+}
+
+// Balance calculations
+const getOpeningBalance = () => {
+  return balances?.openingBalance || 0
+}
+
+const getClosingBalance = () => {
+  const opening = getOpeningBalance()
+  const totalCashImpact = getTotalCashImpact()
+  
+  return opening + totalCashImpact
+}
+
+const getTransactionTypeIcon = (type: string) => {
+  switch (type?.toLowerCase()) {
+    case "sale":
+      return <ShoppingCart className="h-4 w-4" />
+    case "purchase":
+      return <Package className="h-4 w-4" />
+    default:
+      return <Clock className="h-4 w-4" />
+  }
+}
+
+const formatDate = (date: Date) => {
+  return format(date, "M/d/yyyy")
+}
+
+const setToday = () => {
+  const today = new Date()
+  const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0)
+  const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+
+  handleDateFromChange(todayStart)
+  handleDateToChange(todayEnd)
+}
+
+const setLastWeek = () => {
+  const today = new Date()
+  const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 })
+  const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+
+  handleDateFromChange(lastWeekStart)
+  handleDateToChange(todayEnd)
+}
+
+
+
 
   return (
     <div className="space-y-4">
@@ -1304,7 +1771,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                     <TrendingUp className="h-4 w-4" />
                     <span className="text-xs">Profit</span>
                   </div>
-                  <div className="text-lg font-bold">{`${currency} ${getProfit().toFixed(2)}`}</div>
+                  <div className="text-lg font-bold">{`${currency} ${getTotalProfit().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
                     COGS: {currency} {getFilteredCogs().toFixed(2)}
                   </div>
@@ -1320,7 +1787,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getAmountReceived().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Inflows: {filteredTransactions.filter((t) => getNetImpact(t) > 0).length}
+                    Inflows: {filteredTransactions.filter((t) => getCashImpact(t) > 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1334,7 +1801,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                   </div>
                   <div className="text-lg font-bold">{`${currency} ${getSpends().toFixed(2)}`}</div>
                   <div className="text-[10px] mt-1">
-                    Outflows: {filteredTransactions.filter((t) => getNetImpact(t) < 0).length}
+                    Outflows: {filteredTransactions.filter((t) => getCashImpact(t) < 0).length}
                   </div>
                 </CardContent>
               </Card>
@@ -1406,9 +1873,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
               <div className="space-y-2">
                 {filteredTransactions.map((transaction) => {
                   const dateTime = formatDateTime(transaction.date)
-                  const netImpact = getNetImpact(transaction)
-                  const isPositive = netImpact > 0
-                  const isNegative = netImpact < 0
+                  const netImpact = getTotalCashImpact(transaction)
+                  const cashImpact = getCashImpact(transaction)
+                  const isPositive = cashImpact > 0
+                  const isNegative = cashImpact < 0
                   const remainingAmount = getRemainingAmount(transaction)
                   const moneyFlow = getMoneyFlowDisplay(transaction)
 
@@ -1531,7 +1999,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                               }`}
                             >
                               {isPositive ? "+" : isNegative ? "-" : ""}
-                              {currency} {Math.abs(netImpact).toFixed(2)}
+                              {currency} {Math.abs(cashImpact).toFixed(2)}
                             </div>
                           </div>
                         </div>
