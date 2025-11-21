@@ -1421,7 +1421,7 @@ const getRemainingAmount = (transaction: any) => {
 
 
 
-// Get actual money received (only NET cash inflows)
+
 const getAmountReceived = () => {
   if (!filteredTransactions) return 0
   
@@ -1430,14 +1430,34 @@ const getAmountReceived = () => {
   filteredTransactions.forEach((t) => {
     if (!t) return
     
-    const cashImpact = getCashImpact(t)
-    if (cashImpact > 0) {
-      totalReceived += cashImpact
+    const type = t.type?.toLowerCase()
+    const description = t.description || ""
+    const received = n(t.received)
+    const credit = n(t.credit)
+    
+    // For sales - count full received amount
+    if (type === 'sale') {
+      totalReceived += received
+    }
+    // For sale adjustments - count full additional money received
+    else if (type === 'adjustment' && description.includes('Sale')) {
+      totalReceived += (received > 0 ? received : credit)
+    }
+    // For purchase refunds - count full refund amount
+    else if (type === 'adjustment' && description.includes('Purchase') && credit > 0) {
+      totalReceived += credit
+    }
+    // For other transactions - count credit amounts (money coming in)
+    else if (credit > 0) {
+      totalReceived += credit
     }
   })
 
   return totalReceived
 }
+
+
+
 
 // Get spends (money out)
 const getSpends = () => {
