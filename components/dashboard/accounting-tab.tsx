@@ -757,7 +757,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                 ${filteredTransactions
                   .map((t) => {
                     const dateTime = formatDateTime(t.date)
-                    const netImpact = getNetImpact(t)
+                    const netImpact = getCashImpact(t)
                     const cashImpact = getCashImpact(t)
                     const moneyFlow = getMoneyFlowDisplay(t)
                     return `
