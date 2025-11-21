@@ -1456,10 +1456,11 @@ const getAmountReceived = () => {
   return totalReceived
 }
 
+const getTotalReceived = () => {
+  return getAmountReceived()
+}
 
-
-
-// Get spends (money out)
+// FIXED: Get spends (money out) - consistent with getAmountReceived logic
 const getSpends = () => {
   if (!filteredTransactions) return 0
   
@@ -1468,14 +1469,37 @@ const getSpends = () => {
   filteredTransactions.forEach((t) => {
     if (!t) return
     
-    const cashImpact = getCashImpact(t)
-    if (cashImpact < 0) {
-      totalSpends += Math.abs(cashImpact)
+    const type = t.type?.toLowerCase()
+    const description = t.description || ""
+    const received = n(t.received)
+    const debit = n(t.debit)
+    
+    // For purchases - count full amount spent
+    if (type === 'purchase') {
+      totalSpends += received
+    }
+    // For purchase adjustments (payments) - count additional payment
+    else if (type === 'adjustment' && description.includes('Purchase') && debit > 0) {
+      totalSpends += debit
+    }
+    // For supplier payments - count full amount paid
+    else if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+      totalSpends += Math.abs(debit)
+    }
+    // For other transactions - count debit amounts (money going out)
+    else if (debit > 0) {
+      totalSpends += debit
     }
   })
 
   return totalSpends
 }
+
+const getTotalSpends = () => {
+  return getSpends()
+}
+
+
 
 // Calculate sales total
 const getSalesTotal = () => {
@@ -1537,10 +1561,21 @@ const getOpeningBalance = () => {
 
 const getClosingBalance = () => {
   const opening = getOpeningBalance()
-  const totalCashImpact = getTotalCashImpact()
+  const totalReceived = getTotalReceived()
+  const totalSpends = getTotalSpends()
   
-  return opening + totalCashImpact
+  console.log('Closing balance calculation:', {
+    opening,
+    totalReceived,
+    totalSpends,
+    net: totalReceived - totalSpends,
+    closing: opening + totalReceived - totalSpends
+  })
+  
+  return opening + totalReceived - totalSpends
 }
+
+
 
 const getTransactionTypeIcon = (type: string) => {
   switch (type?.toLowerCase()) {
@@ -2500,4 +2535,5 @@ const setLastWeek = () => {
     </div>
   )
 }
+
 
