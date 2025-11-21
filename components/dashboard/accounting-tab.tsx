@@ -99,7 +99,11 @@ const TransactionSkeleton = () => (
         </div>
       </div>
       <div className="flex items-center gap-6">
-        <div className="grid grid-cols-4 gap-4">
+        <div className="grid grid-cols-5 gap-4">
+          <div className="text-right">
+            <Skeleton className="h-3 w-12 mb-1" />
+            <Skeleton className="h-4 w-16" />
+          </div>
           <div className="text-right">
             <Skeleton className="h-3 w-12 mb-1" />
             <Skeleton className="h-4 w-16" />
@@ -214,7 +218,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   const [isManualDialogOpen, setIsManualDialogOpen] = useState(false)
   const [manualAmount, setManualAmount] = useState("")
   const [manualType, setManualType] = useState<"debit" | "credit">("debit")
-  const [manualDescription, setManualDescription] = useState("No Description")
+  const [manualDescription, setManualDescription] = useState("")
   const [manualCategory, setManualCategory] = useState("")
   const [manualPaymentMethod, setManualPaymentMethod] = useState("Cash")
   const [manualDate, setManualDate] = useState<Date>(new Date())
@@ -533,7 +537,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       const result = await recordManualTransaction({
         amount: Number(manualAmount),
         type: manualType,
-        description: manualDescription,
+        description: manualDescription || `${manualType === 'credit' ? 'Income' : 'Expense'}: ${manualCategory}`,
         category: manualCategory,
         paymentMethod: manualPaymentMethod,
         deviceId,
@@ -812,7 +816,6 @@ const extractIdFromDescription = (desc: string) => {
 const n = (v: any) => Number(v) || 0
 
 // Define filteredTransactions first with proper null checks
-// Define filteredTransactions first with proper null checks
 const filteredTransactions =
   financialData?.transactions?.filter((transaction) => {
     if (!transaction) return false
@@ -832,14 +835,12 @@ const filteredTransactions =
     if (filterType === "income") {
       matchesType = (type === 'sale' && received > 0) || (type === 'adjustment' && received > 0)
     } else if (filterType === "expense") {
-      // FIXED: Include purchase adjustments for expense filter
       matchesType = (type === 'purchase' && received > 0) || 
                    (type === 'supplier_payment') ||
                    (type === 'adjustment' && description.includes('Purchase') && received > 0)
     } else if (filterType === "sale") {
       matchesType = type === "sale" || description.toLowerCase().startsWith("sale")
     } else if (filterType === "purchase") {
-      // FIXED: Include purchase adjustments for purchase filter
       matchesType = type === "purchase" || 
                    description.toLowerCase().startsWith("purchase") ||
                    (type === 'adjustment' && description.includes('Purchase'))
@@ -965,7 +966,6 @@ const getProfit = (transaction: any) => {
   return credit - debit
 }
 
-
 // FIXED: Cash Impact - includes both sales profit AND purchase outflows
 // FIXED: Cash Impact for purchase adjustments - handle backend data structure
 const getCashImpact = (transaction: any) => {
@@ -1079,9 +1079,6 @@ const getCashImpact = (transaction: any) => {
   return credit - debit
 }
 
-
-
-
 // FIXED: Total Cash Impact
 const getTotalCashImpact = () => {
   if (!filteredTransactions) return 0
@@ -1097,169 +1094,194 @@ const getTotalCashImpact = () => {
   return totalCashImpact
 }
 
+// NEW: Get actual money in/out amounts (not profit)
+const getMoneyFlowAmount = (transaction: any) => {
+  if (!transaction) return 0
+  
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const received = n(transaction.received)
+  const credit = n(transaction.credit)
+  const debit = n(transaction.debit)
+  
+  // For sales - money in is the actual received amount
+  if (type === 'sale') {
+    return received
+  }
+  
+  // For sale adjustments - money in is the additional payment received
+  if (type === 'adjustment' && description.includes('Sale')) {
+    return received || credit
+  }
+  
+  // For purchases - money out is the actual paid amount
+  if (type === 'purchase') {
+    return received
+  }
+  
+  // For purchase adjustments - money out is the additional payment made
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    return received || debit
+  }
+  
+  // For supplier payments - money out is the payment amount
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return Math.abs(debit)
+  }
+  
+  // For manual transactions - money in/out based on type
+  if (type === 'manual') {
+    return credit > 0 ? credit : -debit
+  }
+  
+  // Default for other transactions
+  return credit > 0 ? credit : -debit
+}
 
-// FIXED: Money flow display based on corrected profit calculation
-const getMoneyFlowDisplay = (transaction: any) => {
+// NEW: Get money flow type (in/out) and display text
+const getMoneyFlowInfo = (transaction: any) => {
   if (!transaction) {
     return {
-      text: "Invalid Transaction",
-      color: "text-gray-600 dark:text-gray-400",
-      value: 0,
-      showAmount: false
+      type: 'none',
+      text: 'No Cash Flow',
+      color: 'text-gray-600 dark:text-gray-400',
+      amount: 0
     }
   }
   
   const type = transaction.type?.toLowerCase()
   const description = transaction.description || ""
-  const profit = getProfit(transaction)
+  const amount = getMoneyFlowAmount(transaction)
   const received = n(transaction.received)
   const totalAmount = n(transaction.amount)
   
-  // --- SALE TRANSACTIONS ---
+  // Sales - Money In
   if (type === 'sale') {
     if (received === 0) {
       return {
-        text: "Credit Sale",
-        color: "text-blue-600 dark:text-blue-400",
-        value: 0,
-        showAmount: false
+        type: 'none',
+        text: 'Credit Sale',
+        color: 'text-blue-600 dark:text-blue-400',
+        amount: 0
       }
     }
-    
     if (received < totalAmount) {
       return {
-        text: "Partial Payment - Profit",
-        color: "text-green-600 dark:text-green-400",
-        value: profit > 0 ? profit : 0,
-        showAmount: true
+        type: 'in',
+        text: 'Partial Payment',
+        color: 'text-green-600 dark:text-green-400',
+        amount: amount
       }
     }
-    
-    if (profit > 0) {
-      return {
-        text: "Profit",
-        color: "text-green-600 dark:text-green-400",
-        value: profit,
-        showAmount: true
-      }
-    } else if (profit === 0) {
-      return {
-        text: "Break Even",
-        color: "text-gray-600 dark:text-gray-400",
-        value: 0,
-        showAmount: false
-      }
-    } else {
-      return {
-        text: "Loss",
-        color: "text-red-600 dark:text-red-400",
-        value: Math.abs(profit),
-        showAmount: true
-      }
-    }
-  }
-  
-  // --- SALE ADJUSTMENTS ---
-  if (type === 'adjustment' && description.includes('Sale')) {
-    if (profit > 0) {
-      return {
-        text: "Additional Profit",
-        color: "text-green-600 dark:text-green-400",
-        value: profit,
-        showAmount: true
-      }
-    } else if (profit < 0) {
-      return {
-        text: "Additional Loss",
-        color: "text-red-600 dark:text-red-400",
-        value: Math.abs(profit),
-        showAmount: true
-      }
-    } else {
-      return {
-        text: "Additional Payment",
-        color: "text-blue-600 dark:text-blue-400",
-        value: n(transaction.received) || n(transaction.credit),
-        showAmount: true
-      }
-    }
-  }
-  
-  // --- PURCHASE TRANSACTIONS ---
-  if (type === 'purchase') {
-    const paid = n(transaction.received)
-    const totalBill = n(transaction.amount)
-    
-    if (paid === 0) {
-      return {
-        text: "Credit Purchase",
-        color: "text-blue-600 dark:text-blue-400",
-        value: 0,
-        showAmount: false
-      }
-    }
-    
-    if (paid > 0 && paid < totalBill) {
-      return {
-        text: "Partial Payment",
-        color: "text-orange-600 dark:text-orange-400",
-        value: paid,
-        showAmount: true
-      }
-    }
-    
     return {
-      text: "Full Payment",
-      color: "text-red-600 dark:text-red-400",
-      value: paid,
-      showAmount: true
+      type: 'in',
+      text: 'Full Payment',
+      color: 'text-green-600 dark:text-green-400',
+      amount: amount
     }
   }
   
-  // --- PURCHASE ADJUSTMENTS ---
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    if (profit > 0) {
+  // Sale adjustments - Money In
+  if (type === 'adjustment' && description.includes('Sale')) {
+    return {
+      type: 'in',
+      text: 'Additional Payment',
+      color: 'text-green-600 dark:text-green-400',
+      amount: amount
+    }
+  }
+  
+  // Purchases - Money Out
+  if (type === 'purchase') {
+    if (received === 0) {
       return {
-        text: "Refund Received",
-        color: "text-green-600 dark:text-green-400",
-        value: profit,
-        showAmount: true
+        type: 'none',
+        text: 'Credit Purchase',
+        color: 'text-blue-600 dark:text-blue-400',
+        amount: 0
       }
     }
+    if (received < totalAmount) {
+      return {
+        type: 'out',
+        text: 'Partial Payment',
+        color: 'text-red-600 dark:text-red-400',
+        amount: amount
+      }
+    }
+    return {
+      type: 'out',
+      text: 'Full Payment',
+      color: 'text-red-600 dark:text-red-400',
+      amount: amount
+    }
   }
   
-  // --- SUPPLIER PAYMENTS ---
+  // Purchase adjustments - Money Out
+  if (type === 'adjustment' && description.includes('Purchase')) {
+    return {
+      type: 'out',
+      text: 'Additional Payment',
+      color: 'text-red-600 dark:text-red-400',
+      amount: amount
+    }
+  }
+  
+  // Supplier payments - Money Out
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
     return {
-      text: "Supplier Payment",
-      color: "text-red-600 dark:text-red-400",
-      value: Math.abs(profit),
-      showAmount: true
+      type: 'out',
+      text: 'Supplier Payment',
+      color: 'text-red-600 dark:text-red-400',
+      amount: amount
     }
   }
   
-  // --- GENERIC CASES ---
-  if (profit > 0) {
-    return {
-      text: "Money In",
-      color: "text-green-600 dark:text-green-400",
-      value: profit,
-      showAmount: true
+  // Manual transactions
+  if (type === 'manual') {
+    const credit = n(transaction.credit)
+    const debit = n(transaction.debit)
+    
+    if (credit > 0) {
+      return {
+        type: 'in',
+        text: 'Money In',
+        color: 'text-green-600 dark:text-green-400',
+        amount: amount
+      }
+    } else if (debit > 0) {
+      return {
+        type: 'out',
+        text: 'Money Out',
+        color: 'text-red-600 dark:text-red-400',
+        amount: amount
+      }
     }
-  } else if (profit < 0) {
+  }
+  
+  // Default cases
+  const cashImpact = getCashImpact(transaction)
+  if (cashImpact > 0) {
     return {
-      text: "Money Out",
-      color: "text-red-600 dark:text-red-400",
-      value: Math.abs(profit),
-      showAmount: true
+      type: 'in',
+      text: 'Money In',
+      color: 'text-green-600 dark:text-green-400',
+      amount: Math.abs(cashImpact)
     }
-  } else {
+  } else if (cashImpact < 0) {
     return {
-      text: "No Cash Impact",
-      color: "text-gray-600 dark:text-gray-400",
-      value: 0,
-      showAmount: false
+      type: 'out',
+      text: 'Money Out',
+      color: 'text-red-600 dark:text-red-400',
+      amount: Math.abs(cashImpact)
     }
+  }
+  
+  return {
+    type: 'none',
+    text: 'No Cash Flow',
+    color: 'text-gray-600 dark:text-gray-400',
+    amount: 0
   }
 }
 
@@ -1303,7 +1325,6 @@ const getFilteredCogs = () => {
 
 // Calculate remaining amount for credit sales and purchases
 // FIXED: Calculate remaining amount for credit sales and purchases including adjustments
-// FIXED: Calculate remaining amount for both sales AND purchases including adjustments
 const getRemainingAmount = (transaction: any) => {
   if (!transaction) return 0
   
@@ -1419,9 +1440,6 @@ const getRemainingAmount = (transaction: any) => {
   return 0
 }
 
-
-
-
 const getAmountReceived = () => {
   if (!filteredTransactions) return 0
   
@@ -1499,41 +1517,100 @@ const getTotalSpends = () => {
   return getSpends()
 }
 
-
-
-// Calculate sales total
+// FIXED: Calculate sales total including adjustments
 const getSalesTotal = () => {
-  if (!financialData?.transactions) return 0
+  if (!filteredTransactions) return 0
   
-  const saleMap = new Map()
+  const saleAmounts = new Map()
   
-  financialData.transactions.forEach((t) => {
-    if (t && t.type === 'sale' && t.sale_id) {
-      saleMap.set(t.sale_id, t.amount)
+  // First pass: collect all sale IDs and their base amounts
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const type = t.type?.toLowerCase()
+    
+    if (type === 'sale' && t.sale_id) {
+      // Store the original sale amount
+      saleAmounts.set(t.sale_id, n(t.amount))
     }
   })
   
+  // Second pass: process adjustments to update the total amounts
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const type = t.type?.toLowerCase()
+    const description = t.description || ""
+    
+    if (type === 'adjustment' && description.includes('Sale')) {
+      const saleId = extractIdFromDescription(description)
+      
+      if (saleId && saleAmounts.has(saleId)) {
+        // Extract the new total amount from adjustment description
+        const toMatch = description.match(/(?:increased|changed)\s+(?:from\s+[\d.]+\s+)?to\s+([\d.]+)/i)
+        const increasedByMatch = description.match(/amount increased by\s+([\d.]+)/i)
+        
+        if (toMatch) {
+          // If we find "to X", that's the new total
+          const newTotal = n(toMatch[1])
+          saleAmounts.set(saleId, newTotal)
+        } else if (increasedByMatch) {
+          // If we find "increased by X", add it to current
+          const currentAmount = saleAmounts.get(saleId) || 0
+          const increaseAmount = n(increasedByMatch[1])
+          saleAmounts.set(saleId, currentAmount + increaseAmount)
+        } else if (n(t.amount) > 0) {
+          // Fallback: if adjustment has an amount, use it as the delta
+          const currentAmount = saleAmounts.get(saleId) || 0
+          saleAmounts.set(saleId, currentAmount + n(t.amount))
+        }
+      }
+    }
+  })
+  
+  // Sum up all final amounts
   let total = 0
-  saleMap.forEach((amount) => {
+  saleAmounts.forEach((amount) => {
     total += amount
   })
   
   return total
 }
 
+// FIXED: Calculate purchases total from filtered transactions including adjustments
 const getPurchasesTotal = () => {
-  if (!financialData?.transactions) return 0
+  if (!filteredTransactions) return 0
   
   const purchaseMap = new Map()
   
-  financialData.transactions.forEach((t) => {
-    if (t && t.type === 'purchase' && t.purchase_id) {
-      purchaseMap.set(t.purchase_id, t.amount)
+  filteredTransactions.forEach((t) => {
+    if (!t) return
+    
+    const type = t.type?.toLowerCase()
+    const description = t.description || ""
+    
+    if (type === 'purchase' && t.purchase_id) {
+      purchaseMap.set(t.purchase_id, n(t.amount))
+    }
+    else if (type === 'adjustment' && description.includes('Purchase')) {
+      const purchaseId = extractIdFromDescription(description)
+      if (purchaseId) {
+        const currentAmount = purchaseMap.get(purchaseId) || 0
+        let adjustmentAmount = 0
+        
+        // Extract from description
+        const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i)
+        if (paymentMatch) {
+          adjustmentAmount = n(paymentMatch[1])
+        }
+        
+        purchaseMap.set(purchaseId, currentAmount + adjustmentAmount)
+      }
     }
   })
   
   let total = 0
-  purchaseMap.forEach((amount) => {
+  purchaseMap.forEach((amount, purchaseId) => {
     total += amount
   })
   
@@ -1575,14 +1652,18 @@ const getClosingBalance = () => {
   return opening + totalReceived - totalSpends
 }
 
-
-
 const getTransactionTypeIcon = (type: string) => {
   switch (type?.toLowerCase()) {
     case "sale":
       return <ShoppingCart className="h-4 w-4" />
     case "purchase":
       return <Package className="h-4 w-4" />
+    case "supplier_payment":
+      return <CreditCard className="h-4 w-4" />
+    case "manual":
+      return <Plus className="h-4 w-4" />
+    case "adjustment":
+      return <RefreshCw className="h-4 w-4" />
     default:
       return <Clock className="h-4 w-4" />
   }
@@ -1610,8 +1691,70 @@ const setLastWeek = () => {
   handleDateToChange(todayEnd)
 }
 
-
-
+// NEW: Enhanced description generator
+const getEnhancedDescription = (transaction: any) => {
+  if (!transaction) return "Unknown Transaction"
+  
+  const type = transaction.type?.toLowerCase()
+  const description = transaction.description || ""
+  const amount = n(transaction.amount)
+  const received = n(transaction.received)
+  const status = transaction.status?.toLowerCase()
+  
+  // Sale transactions
+  if (type === 'sale') {
+    if (status === 'credit') {
+      return `Credit Sale #${transaction.sale_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Pending: ${currency} ${(amount - received).toFixed(2)})`
+    } else if (status === 'completed') {
+      if (received < amount) {
+        return `Partial Payment Sale #${transaction.sale_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Paid: ${currency} ${received.toFixed(2)})`
+      } else {
+        return `Completed Sale #${transaction.sale_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+      }
+    }
+    return `Sale #${transaction.sale_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+  }
+  
+  // Purchase transactions
+  if (type === 'purchase') {
+    if (status === 'credit') {
+      return `Credit Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Pending: ${currency} ${(amount - received).toFixed(2)})`
+    } else if (status === 'paid') {
+      if (received < amount) {
+        return `Partial Payment Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)} (Paid: ${currency} ${received.toFixed(2)})`
+      } else {
+        return `Paid Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+      }
+    }
+    return `Purchase #${transaction.purchase_id || 'N/A'} - ${currency} ${amount.toFixed(2)}`
+  }
+  
+  // Adjustment transactions
+  if (type === 'adjustment') {
+    if (description.includes('Sale')) {
+      const saleId = extractIdFromDescription(description)
+      return `Sale Adjustment #${saleId || 'N/A'} - ${description}`
+    }
+    if (description.includes('Purchase')) {
+      const purchaseId = extractIdFromDescription(description)
+      return `Purchase Adjustment #${purchaseId || 'N/A'} - ${description}`
+    }
+    return `Adjustment: ${description}`
+  }
+  
+  // Supplier payments
+  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
+    return `Supplier Payment - ${currency} ${Math.abs(n(transaction.debit)).toFixed(2)}`
+  }
+  
+  // Manual transactions
+  if (type === 'manual') {
+    return `Manual Entry: ${description || 'No description'}`
+  }
+  
+  // Fallback to original description
+  return description || "Transaction"
+}
 
   return (
     <div className="space-y-4">
@@ -1926,14 +2069,27 @@ const setLastWeek = () => {
               </div>
             ) : (
               <div className="space-y-2">
+                {/* Transaction Headers */}
+                <div className="grid grid-cols-12 gap-4 px-4 py-2 bg-gray-50 dark:bg-gray-700 rounded-lg text-xs font-medium text-gray-600 dark:text-gray-300">
+                  <div className="col-span-3">Description</div>
+                  <div className="col-span-1 text-center">Type</div>
+                  <div className="col-span-1 text-center">Status</div>
+                  <div className="col-span-1 text-right">Total Bill</div>
+                  <div className="col-span-1 text-right">Money In/Out</div>
+                  <div className="col-span-1 text-right">Remaining</div>
+                  <div className="col-span-1 text-right">Product Cost</div>
+                  <div className="col-span-1 text-right">Cash Impact</div>
+                  <div className="col-span-2 text-right">Date & Time</div>
+                </div>
+
                 {filteredTransactions.map((transaction) => {
                   const dateTime = formatDateTime(transaction.date)
-                  const netImpact = getTotalCashImpact(transaction)
                   const cashImpact = getCashImpact(transaction)
                   const isPositive = cashImpact > 0
                   const isNegative = cashImpact < 0
                   const remainingAmount = getRemainingAmount(transaction)
-                  const moneyFlow = getMoneyFlowDisplay(transaction)
+                  const moneyFlowInfo = getMoneyFlowInfo(transaction)
+                  const enhancedDescription = getEnhancedDescription(transaction)
 
                   // Determine transaction type and extract the correct ID
                   const isSale = transaction.type === "sale" || transaction.description?.toLowerCase().startsWith("sale")
@@ -1971,7 +2127,7 @@ const setLastWeek = () => {
                   return (
                     <div
                       key={transaction.id}
-                      className="border dark:border-gray-700 rounded-lg p-4 hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer"
+                      className="grid grid-cols-12 gap-4 px-4 py-3 border dark:border-gray-700 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/30 transition-colors cursor-pointer items-center"
                       onClick={handleClick}
                       tabIndex={0}
                       role="button"
@@ -1982,81 +2138,88 @@ const setLastWeek = () => {
                         "View Transaction"
                       }
                     >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <div className="text-gray-500 dark:text-gray-400">
-                            {getTransactionTypeIcon(transaction.type)}
-                          </div>
-                          <div>
-                            <div className="font-medium text-gray-900 dark:text-gray-100">
-                              {transaction.description || "No description"}
-                            </div>
-                            <div className="text-xs text-gray-500 dark:text-gray-400 flex items-center gap-2">
-                              {dateTime.date} at {dateTime.time}
-                              <span className="inline-flex gap-1">
-                                {getStatusBadge(transaction.status)}
-                                <Badge variant="outline" className="text-xs dark:border-gray-600 dark:text-gray-300">
-                                  {transaction.type || "unknown"}
-                                </Badge>
-                              </span>
-                            </div>
+                      {/* Description */}
+                      <div className="col-span-3 flex items-center gap-2">
+                        <div className="text-gray-500 dark:text-gray-400">
+                          {getTransactionTypeIcon(transaction.type)}
+                        </div>
+                        <div className="min-w-0">
+                          <div className="font-medium text-gray-900 dark:text-gray-100 text-sm truncate">
+                            {enhancedDescription}
                           </div>
                         </div>
+                      </div>
 
-                        <div className="flex items-center gap-6">
-                          {/* FIXED: Corrected Money Flow display */}
-                          <div className="grid grid-cols-4 gap-4 text-sm">
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Transaction Amount</div>
-                              <div className="text-gray-900 dark:text-gray-100 font-medium">
-                                {currency} {transaction.amount.toFixed(2)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">
-                                {moneyFlow.text}
-                              </div>
-                              <div className={`font-medium ${moneyFlow.color}`}>
-                                {moneyFlow.showAmount 
-                                  ? `${currency} ${moneyFlow.value.toFixed(2)}`
-                                  : moneyFlow.text
-                                }
-                              </div>
-                            </div>
-                            {/* Remaining column for credit sales and purchases */}
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Remaining</div>
-                              <div className={
-                                remainingAmount > 0 
-                                  ? "text-yellow-600 dark:text-yellow-400 font-medium" 
-                                  : "text-gray-400 dark:text-gray-500 font-medium"
-                              }>
-                                {currency} {remainingAmount.toFixed(2)}
-                              </div>
-                            </div>
-                            <div className="text-right">
-                              <div className="text-xs text-gray-500 dark:text-gray-400">Product Cost (COGS)</div>
-                              <div className="text-orange-600 dark:text-orange-400 font-medium">
-                                {currency} {transaction.cost.toFixed(2)}
-                              </div>
-                            </div>
-                          </div>
+                      {/* Type */}
+                      <div className="col-span-1 text-center">
+                        <Badge variant="outline" className="text-xs dark:border-gray-600 dark:text-gray-300 capitalize">
+                          {transaction.type || "unknown"}
+                        </Badge>
+                      </div>
 
-                          <div className="min-w-[120px] text-right">
-                            <div className="text-xs text-gray-500 dark:text-gray-400">Cash Impact</div>
-                            <div
-                              className={`font-bold text-base ${
-                                isPositive 
-                                  ? "text-green-600 dark:text-green-400" 
-                                  : isNegative 
-                                    ? "text-red-600 dark:text-red-400" 
-                                    : "text-gray-600 dark:text-gray-400"
-                              }`}
-                            >
-                              {isPositive ? "+" : isNegative ? "-" : ""}
-                              {currency} {Math.abs(cashImpact).toFixed(2)}
-                            </div>
+                      {/* Status */}
+                      <div className="col-span-1 text-center">
+                        {getStatusBadge(transaction.status)}
+                      </div>
+
+                      {/* Total Bill Amount */}
+                      <div className="col-span-1 text-right">
+                        <div className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                          {currency} {n(transaction.amount).toFixed(2)}
+                        </div>
+                      </div>
+
+                      {/* Money In/Out */}
+                      <div className="col-span-1 text-right">
+                        {moneyFlowInfo.type !== 'none' ? (
+                          <div className={`text-sm font-medium ${moneyFlowInfo.color}`}>
+                            {moneyFlowInfo.type === 'in' ? '+' : '-'}{currency} {moneyFlowInfo.amount.toFixed(2)}
+                            <div className="text-xs">{moneyFlowInfo.text}</div>
                           </div>
+                        ) : (
+                          <div className="text-sm text-gray-500 dark:text-gray-400">
+                            {moneyFlowInfo.text}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Remaining */}
+                      <div className="col-span-1 text-right">
+                        <div className={`text-sm font-medium ${
+                          remainingAmount > 0 
+                            ? "text-yellow-600 dark:text-yellow-400" 
+                            : "text-gray-400 dark:text-gray-500"
+                        }`}>
+                          {remainingAmount > 0 ? `${currency} ${remainingAmount.toFixed(2)}` : 'Paid'}
+                        </div>
+                      </div>
+
+                      {/* Product Cost */}
+                      <div className="col-span-1 text-right">
+                        <div className="text-sm font-medium text-orange-600 dark:text-orange-400">
+                          {currency} {n(transaction.cost).toFixed(2)}
+                        </div>
+                      </div>
+
+                      {/* Cash Impact */}
+                      <div className="col-span-1 text-right">
+                        <div className={`text-sm font-bold ${
+                          isPositive 
+                            ? "text-green-600 dark:text-green-400" 
+                            : isNegative 
+                              ? "text-red-600 dark:text-red-400" 
+                              : "text-gray-600 dark:text-gray-400"
+                        }`}>
+                          {isPositive ? "+" : isNegative ? "-" : ""}
+                          {currency} {Math.abs(cashImpact).toFixed(2)}
+                        </div>
+                      </div>
+
+                      {/* Date & Time */}
+                      <div className="col-span-2 text-right">
+                        <div className="text-xs text-gray-500 dark:text-gray-400">
+                          <div>{dateTime.date}</div>
+                          <div>{dateTime.time}</div>
                         </div>
                       </div>
                     </div>
@@ -2369,22 +2532,23 @@ const setLastWeek = () => {
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="manual-category">Category</Label>
+              <Label htmlFor="manual-category">Category *</Label>
               <Input
                 id="manual-category"
                 value={manualCategory}
                 onChange={(e) => setManualCategory(e.target.value)}
-                placeholder="e.g., Office Supplies, Petty Cash"
+                placeholder="e.g., Office Supplies, Petty Cash, Utilities"
+                required
               />
             </div>
 
             <div className="grid gap-2">
-              <Label htmlFor="manual-description">Description (optional)</Label>
+              <Label htmlFor="manual-description">Description</Label>
               <Textarea
                 id="manual-description"
                 value={manualDescription}
                 onChange={(e) => setManualDescription(e.target.value)}
-                placeholder="Enter transaction description"
+                placeholder="Enter transaction description (optional)"
               />
             </div>
 
@@ -2420,7 +2584,7 @@ const setLastWeek = () => {
             </Button>
             <Button
               onClick={handleAddManualTransaction}
-              disabled={isAddingManual}
+              disabled={isAddingManual || !manualCategory || !manualAmount}
               className="bg-blue-600 hover:bg-blue-700"
             >
               {isAddingManual ? (
@@ -2535,5 +2699,4 @@ const setLastWeek = () => {
     </div>
   )
 }
-
 
