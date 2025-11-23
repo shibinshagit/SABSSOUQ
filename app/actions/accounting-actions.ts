@@ -1061,6 +1061,7 @@ function getAccountType(transactionType: string): string {
 }
 
 // FIXED: Get opening and closing balances based on actual transaction data with date range
+// FIXED: Get opening and closing balances based on actual transaction data with date range
 export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
   try {
     console.log(
@@ -1089,7 +1090,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     // Money In: credit_amount (sales income, payments received)
     // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
     
-    // Opening balance: All transactions BEFORE opening date
+    // Opening balance: All transactions BEFORE opening date (< opening date at 00:00:00)
     const openingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
@@ -1099,7 +1100,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date < ${openingDateStr}::timestamp
     `
 
-    // Closing balance: All transactions UP TO closing date
+    // Closing balance: All transactions UP TO AND INCLUDING closing date (≤ closing date at 23:59:59)
     const closingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
@@ -1109,36 +1110,82 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date <= ${closingDateStr}::timestamp
     `
 
+    // Period transactions: Transactions WITHIN the selected date range (opening to closing, inclusive)
+    const periodTransactions = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date >= ${openingDateStr}::timestamp
+        AND transaction_date <= ${closingDateStr}::timestamp
+    `
+
+    // Calculate opening balance (before the period starts)
     const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
     const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
     const openingBalance = openingCredits - openingDebits
 
+    // Calculate closing balance (at the end of the period)
     const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
     const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
     const closingBalance = closingCredits - closingDebits
 
+    // Calculate period changes (transactions during the selected period)
+    const periodCredits = Number(periodTransactions[0]?.total_credits) || 0
+    const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
+    const periodNet = periodCredits - periodDebits
+
+    // Verification: opening + period net should equal closing
+    const calculatedClosing = openingBalance + periodNet
+    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
+
     console.log("Balance calculation results:", {
+      dateRange: `${openingDateStr} to ${closingDateStr}`,
       openingCredits,
       openingDebits,
       openingBalance,
+      periodCredits,
+      periodDebits,
+      periodNet,
       closingCredits,
       closingDebits,
       closingBalance,
+      verification: {
+        calculated: calculatedClosing,
+        actual: closingBalance,
+        matches: balanceMatches ? '✅ CORRECT' : '❌ ERROR'
+      }
     })
 
+    // Log warning if balances don't match
+    if (!balanceMatches) {
+      console.warn("⚠️ Balance verification failed!", {
+        expected: calculatedClosing,
+        actual: closingBalance,
+        difference: closingBalance - calculatedClosing
+      })
+    }
+
     return {
-      openingBalance,
-      closingBalance,
-      openingCredits,
-      openingDebits,
-      closingCredits,
-      closingDebits,
+      openingBalance,      // Balance before the period starts
+      closingBalance,      // Balance at the end of the period
+      periodCredits,       // Money in during the period
+      periodDebits,        // Money out during the period
+      periodNet,           // Net change during the period (credits - debits)
+      openingCredits,      // Total credits before period
+      openingDebits,       // Total debits before period
+      closingCredits,      // Total credits up to end of period
+      closingDebits,       // Total debits up to end of period
     }
   } catch (error) {
     console.error("Error getting accounting balances:", error)
     return {
       openingBalance: 0,
       closingBalance: 0,
+      periodCredits: 0,
+      periodDebits: 0,
+      periodNet: 0,
       openingCredits: 0,
       openingDebits: 0,
       closingCredits: 0,

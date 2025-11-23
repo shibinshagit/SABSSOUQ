@@ -1632,23 +1632,19 @@ const getTotalProfit = () => {
 }
 
 // Balance calculations
+const getClosingBalance = () => {
+  // ALWAYS use the closing balance from backend
+  // This represents the absolute balance at the end of the selected period
+  return balances?.closingBalance || 0
+}
+
 const getOpeningBalance = () => {
+  // Use the opening balance from backend
+  // This represents the balance before the selected period started
   return balances?.openingBalance || 0
 }
 
-const getClosingBalance = () => {
-  // Option 1: Use the balance data from backend
-  if (balances?.closingBalance !== undefined) {
-    return balances.closingBalance
-  }
   
-  // Option 2: Calculate from opening + filtered period transactions
-  const opening = getOpeningBalance()
-  const totalReceived = getTotalReceived() // from filtered transactions
-  const totalSpends = getTotalSpends() // from filtered transactions
-  
-  return opening + totalReceived - totalSpends
-}
 
 
 const getTransactionTypeIcon = (type: string) => {
