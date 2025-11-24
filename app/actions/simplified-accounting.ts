@@ -852,9 +852,12 @@ function calculateFinancialMetrics(
   let filteredCogs = 0
   let totalCashImpact = 0
 
-  const saleAmounts = new Map()
-  const purchaseAmounts = new Map()
-  const cogsMap = new Map()
+  // Use Sets to track unique IDs to prevent double counting
+  const processedSaleIds = new Set()
+  const processedPurchaseIds = new Set()
+  
+  let totalSales = 0
+  let totalPurchases = 0
 
   // Process each transaction
   const processedTransactions = transactions.map((tx: any) => {
@@ -875,6 +878,12 @@ function calculateFinancialMetrics(
       if (purchaseData) {
         amount = n(purchaseData.total_amount)
         received = n(purchaseData.received_amount)
+        
+        // Only count each purchase once
+        if (!processedPurchaseIds.has(tx.reference_id)) {
+          totalPurchases += amount
+          processedPurchaseIds.add(tx.reference_id)
+        }
       }
     }
     
@@ -883,6 +892,12 @@ function calculateFinancialMetrics(
       if (saleData) {
         amount = n(saleData.total_amount)
         received = n(saleData.received_amount)
+        
+        // Only count each sale once
+        if (!processedSaleIds.has(tx.reference_id)) {
+          totalSales += amount
+          processedSaleIds.add(tx.reference_id)
+        }
       }
     }
 
@@ -900,31 +915,17 @@ function calculateFinancialMetrics(
     totalProfit += profit
     totalCashImpact += cashImpact
 
-    // FIXED: Track unique sales/purchases WITHOUT adding to totals yet
+    // Track cash flows (FIXED: Use proper logic)
     if (type === 'sale') {
       amountReceived += received
-      
-      // Only track unique sales
-      if (tx.reference_id && !saleAmounts.has(tx.reference_id)) {
-        saleAmounts.set(tx.reference_id, amount)  // Store for final calculation
-      }
-      
-      // Track COGS (avoid double counting)
-      if (tx.reference_id && !cogsMap.has(tx.reference_id)) {
-        cogsMap.set(tx.reference_id, cost)
+      if (!processedSaleIds.has(tx.reference_id)) {
         filteredCogs += cost
       }
     } else if (type === 'purchase') {
       spends += received
-      
-      // Only track unique purchases
-      if (tx.reference_id && !purchaseAmounts.has(tx.reference_id)) {
-        purchaseAmounts.set(tx.reference_id, amount)  // Store for final calculation
-      }
     } else if (type === 'adjustment') {
       if (description.includes('Sale')) {
         amountReceived += (received > 0 ? received : credit)
-        
         // Extract COGS from adjustment description
         const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
         if (costMatch) {
@@ -967,22 +968,16 @@ function calculateFinancialMetrics(
     }
   })
 
-  // Process adjustments to update sale/purchase amounts
-  processAdjustments(transactions, saleAmounts, purchaseAmounts)
-
-  // FIXED: Calculate totals from unique sales/purchases AFTER processing adjustments
-  const totalSales = Array.from(saleAmounts.values()).reduce((sum, amt) => sum + amt, 0)
-  const totalPurchases = Array.from(purchaseAmounts.values()).reduce((sum, amt) => sum + amt, 0)
-
   const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + n(r.outstanding_amount), 0)
   const accountsPayable = payablesQuery.reduce((sum, p) => sum + n(p.outstanding_amount), 0)
   const netProfit = totalIncome - totalExpenses
 
-  console.log("💰 FINAL CALCULATIONS:")
-  console.log(`  Total Sales: ${totalSales.toFixed(2)} (from ${saleAmounts.size} unique sales)`)
-  console.log(`  Total Purchases: ${totalPurchases.toFixed(2)} (from ${purchaseAmounts.size} unique purchases)`)
+  console.log("💰 FINAL CALCULATIONS (FIXED):")
+  console.log(`  Total Sales: ${totalSales.toFixed(2)} (from ${processedSaleIds.size} unique sales)`)
+  console.log(`  Total Purchases: ${totalPurchases.toFixed(2)} (from ${processedPurchaseIds.size} unique purchases)`)
   console.log(`  Amount Received: ${amountReceived.toFixed(2)}`)
   console.log(`  Spends: ${spends.toFixed(2)}`)
+  console.log(`  Filtered COGS: ${filteredCogs.toFixed(2)}`)
 
   return {
     summary: {
@@ -1674,137 +1669,4 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     }
   }
 }
-
-// DEBUG FUNCTIONS
-
-export async function debugFinancialTransactions(deviceId: number) {
-  try {
-    console.log("🔍 DEBUG FINANCIAL TRANSACTIONS FOR DEVICE", deviceId)
-    
-    // Check if table exists and has data
-    const tableExists = await sql`
-      SELECT EXISTS (
-        SELECT FROM information_schema.tables 
-        WHERE table_name = 'financial_transactions'
-      ) as exists
-    `
-    
-    console.log("Table exists:", tableExists[0]?.exists)
-    
-    if (!tableExists[0]?.exists) {
-      console.log("❌ financial_transactions table doesn't exist!")
-      return
-    }
-    
-    // Get ALL transactions with detailed info
-    const transactions = await sql`
-      SELECT * FROM financial_transactions 
-      WHERE device_id = ${deviceId}
-      ORDER BY transaction_date, id
-    `
-    
-    console.log(`📊 Found ${transactions.length} transactions in financial_transactions table`)
-    
-    // Show transaction flow with running balance
-    let runningBalance = 0
-    console.log("\n🧮 TRANSACTION FLOW WITH RUNNING BALANCE:")
-    
-    transactions.forEach((tx: any, index: number) => {
-      const netChange = Number(tx.credit_amount) - Number(tx.debit_amount)
-      runningBalance += netChange
-      
-      console.log(
-        `${index + 1}. ${tx.transaction_date} | ${tx.transaction_type.padEnd(15)} | ` +
-        `Amt: ${Number(tx.amount).toFixed(2).padStart(8)} | ` +
-        `Debit: ${Number(tx.debit_amount).toFixed(2).padStart(8)} | ` +
-        `Credit: ${Number(tx.credit_amount).toFixed(2).padStart(8)} | ` +
-        `Net: ${netChange.toFixed(2).padStart(8)} | ` +
-        `Balance: ${runningBalance.toFixed(2).padStart(10)} | ` +
-        `${tx.description}`
-      )
-    })
-    
-    console.log(`\n💰 FINAL CALCULATED BALANCE: ${runningBalance.toFixed(2)}`)
-    
-    // Analyze transaction types
-    const typeAnalysis = transactions.reduce((acc: any, tx: any) => {
-      const type = tx.transaction_type
-      if (!acc[type]) {
-        acc[type] = { count: 0, totalDebit: 0, totalCredit: 0, net: 0 }
-      }
-      acc[type].count++
-      acc[type].totalDebit += Number(tx.debit_amount)
-      acc[type].totalCredit += Number(tx.credit_amount)
-      acc[type].net += (Number(tx.credit_amount) - Number(tx.debit_amount))
-      return acc
-    }, {})
-    
-    console.log("\n📈 TRANSACTION TYPE ANALYSIS:")
-    Object.entries(typeAnalysis).forEach(([type, data]: [string, any]) => {
-      console.log(`- ${type.padEnd(15)}: ${data.count} transactions | Debit: ${data.totalDebit.toFixed(2)} | Credit: ${data.totalCredit.toFixed(2)} | Net: ${data.net.toFixed(2)}`)
-    })
-    
-    return { transactions, finalBalance: runningBalance }
-    
-  } catch (error) {
-    console.error("Error in debugFinancialTransactions:", error)
-    return { error: error.message }
-  }
-}
-
-export async function accountingHealthCheck(deviceId: number) {
-  console.log("🏥 ACCOUNTING HEALTH CHECK")
-  
-  const transactions = await sql`
-    SELECT * FROM financial_transactions 
-    WHERE device_id = ${deviceId}
-    ORDER BY transaction_date DESC
-    LIMIT 100
-  `
-  
-  // Analyze recent transactions
-  const recentAnalysis = transactions.reduce((acc: any, tx: any) => {
-    const type = tx.transaction_type
-    if (!acc[type]) acc[type] = { count: 0, amount: 0 }
-    acc[type].count++
-    acc[type].amount += Number(tx.amount)
-    return acc
-  }, {})
-  
-  console.log("Recent Transaction Analysis:", recentAnalysis)
-  
-  // Check for potential accounting errors
-  const potentialIssues = []
-  
-  // 1. Check supplier payments
-  const supplierPayments = transactions.filter((t: any) => t.transaction_type === 'supplier_payment')
-  if (supplierPayments.length > 0) {
-    potentialIssues.push(`⚠️ ${supplierPayments.length} supplier payments - ensure these reduce liabilities, not just cash`)
-  }
-  
-  // 2. Check manual expenses
-  const manualExpenses = transactions.filter((t: any) => 
-    t.transaction_type === 'manual' && Number(t.debit_amount) > 0
-  )
-  if (manualExpenses.length > 10) {
-    potentialIssues.push(`⚠️ ${manualExpenses.length} manual expenses - review if these are business-related`)
-  }
-  
-  // 3. Check if credits > debits overall
-  const totalCredits = transactions.reduce((sum: number, t: any) => sum + Number(t.credit_amount), 0)
-  const totalDebits = transactions.reduce((sum: number, t: any) => sum + Number(t.debit_amount), 0)
-  
-  if (totalDebits > totalCredits) {
-    potentialIssues.push(`⚠️ Cash outflow (${totalDebits}) exceeds inflow (${totalCredits}) by ${totalDebits - totalCredits}`)
-  }
-  
-  console.log("Potential Accounting Issues:", potentialIssues)
-  
-  return {
-    recentAnalysis,
-    potentialIssues,
-    cashFlowHealth: totalCredits - totalDebits
-  }
-}
-
 
