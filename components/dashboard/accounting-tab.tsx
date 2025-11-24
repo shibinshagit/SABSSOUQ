@@ -64,6 +64,7 @@ import ViewManualTransactionModal from "../manual/ViewManualTransactionModal"
 import EditManualTransactionModal from "../manual/EditManualTransactionModal"
 import ViewSupplierPaymentModal from "../suppliers/View-supplier-payment-model"
 import EditSupplierPaymentModal from "../suppliers/View-suplier-payment-edit"
+import { debugTransactionComparison } from "@/app/actions/simplified-accounting"
 
 interface AccountingTabProps {
   userId: number
@@ -1066,6 +1067,19 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
           </Button>
 
           <Button
+                        variant="secondary"
+                        size="sm"
+                        className="bg-white/20 text-white border-0 hover:bg-white/30"
+                        onClick={async () => {
+                          const result = await debugTransactionComparison(deviceId, dateFrom, dateTo)
+                          console.log("DEBUG RESULT:", result)
+                          toast.success("Check console for debug info")
+                        }}
+                      >
+                        🐛 Debug Data
+                      </Button>
+
+          <Button
             variant="secondary"
             size="sm"
             className="bg-white/20 text-white border-0 hover:bg-white/30"
@@ -1311,6 +1325,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
                         "View Transaction"
                       }
                     >
+                      
                       {/* Description */}
                       <div className="col-span-3 flex items-center gap-2">
                         <div className="text-gray-500 dark:text-gray-400">
