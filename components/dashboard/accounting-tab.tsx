@@ -1632,25 +1632,12 @@ const getTotalProfit = () => {
 }
 
 // Balance calculations
-const getOpeningBalance = () => {
-  return balances?.openingBalance || 0
+const getClosingBalance = () => {
+  // ALWAYS use the closing balance from backend
+  // This represents the absolute balance at the end of the selected period
+  return balances?.closingBalance || 0
 }
 
-const getClosingBalance = () => {
-  const opening = getOpeningBalance()
-  const totalReceived = getTotalReceived()
-  const totalSpends = getTotalSpends()
-  
-  console.log('Closing balance calculation:', {
-    opening,
-    totalReceived,
-    totalSpends,
-    net: totalReceived - totalSpends,
-    closing: opening + totalReceived - totalSpends
-  })
-  
-  return opening + totalReceived - totalSpends
-}
 
 const getTransactionTypeIcon = (type: string) => {
   switch (type?.toLowerCase()) {
