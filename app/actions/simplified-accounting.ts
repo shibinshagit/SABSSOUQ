@@ -832,6 +832,7 @@ async function getSaleDataMap(transactions: any[]) {
 }
 
 // MAIN CALCULATION FUNCTION - All frontend logic moved here
+// MAIN CALCULATION FUNCTION - All frontend logic moved here
 function calculateFinancialMetrics(
   transactions: any[], 
   receivablesQuery: any[], 
@@ -846,8 +847,6 @@ function calculateFinancialMetrics(
   let totalExpenses = 0
   let totalCogs = 0
   let totalProfit = 0
-  let totalSales = 0
-  let totalPurchases = 0
   let amountReceived = 0
   let spends = 0
   let filteredCogs = 0
@@ -901,25 +900,36 @@ function calculateFinancialMetrics(
     totalProfit += profit
     totalCashImpact += cashImpact
 
-    // Update specific totals
+    // FIXED: Track unique sales/purchases WITHOUT adding to totals yet
     if (type === 'sale') {
-      totalSales += amount
       amountReceived += received
       
-      // Track sale amounts for adjustments
+      // Only track unique sales
       if (tx.reference_id && !saleAmounts.has(tx.reference_id)) {
-        saleAmounts.set(tx.reference_id, amount)
+        saleAmounts.set(tx.reference_id, amount)  // Store for final calculation
+      }
+      
+      // Track COGS (avoid double counting)
+      if (tx.reference_id && !cogsMap.has(tx.reference_id)) {
+        cogsMap.set(tx.reference_id, cost)
+        filteredCogs += cost
       }
     } else if (type === 'purchase') {
-      totalPurchases += amount
       spends += received
       
+      // Only track unique purchases
       if (tx.reference_id && !purchaseAmounts.has(tx.reference_id)) {
-        purchaseAmounts.set(tx.reference_id, amount)
+        purchaseAmounts.set(tx.reference_id, amount)  // Store for final calculation
       }
     } else if (type === 'adjustment') {
       if (description.includes('Sale')) {
         amountReceived += (received > 0 ? received : credit)
+        
+        // Extract COGS from adjustment description
+        const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
+        if (costMatch) {
+          filteredCogs += n(costMatch[1])
+        }
       } else if (description.includes('Purchase')) {
         spends += (received > 0 ? received : debit)
       }
@@ -929,22 +939,6 @@ function calculateFinancialMetrics(
       // Manual transactions
       if (credit > 0) amountReceived += credit
       if (debit > 0) spends += debit
-    }
-
-    // Track COGS (avoid double counting)
-    if (type === 'sale' && tx.reference_id) {
-      if (!cogsMap.has(tx.reference_id)) {
-        cogsMap.set(tx.reference_id, cost)
-        filteredCogs += cost
-      }
-    } else if (type === 'adjustment' && description.includes('Sale')) {
-      // Extract COGS from adjustment description
-      const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-      if (costMatch) {
-        filteredCogs += n(costMatch[1])
-      }
-    } else {
-      filteredCogs += cost
     }
 
     return {
@@ -967,23 +961,28 @@ function calculateFinancialMetrics(
       purchase_id: tx.reference_type === 'purchase' ? tx.reference_id : undefined,
       supplier_payment_id: tx.reference_type === 'supplier' ? tx.reference_id : undefined,
       reference_id: tx.reference_id,
-      // Calculated fields
       profit,
       cashImpact,
       moneyFlow: moneyFlowInfo,
     }
   })
 
-  // Process adjustments to update totals
+  // Process adjustments to update sale/purchase amounts
   processAdjustments(transactions, saleAmounts, purchaseAmounts)
 
-  // Final total calculations
-  totalSales = Array.from(saleAmounts.values()).reduce((sum, amt) => sum + amt, 0)
-  totalPurchases = Array.from(purchaseAmounts.values()).reduce((sum, amt) => sum + amt, 0)
+  // FIXED: Calculate totals from unique sales/purchases AFTER processing adjustments
+  const totalSales = Array.from(saleAmounts.values()).reduce((sum, amt) => sum + amt, 0)
+  const totalPurchases = Array.from(purchaseAmounts.values()).reduce((sum, amt) => sum + amt, 0)
 
   const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + n(r.outstanding_amount), 0)
   const accountsPayable = payablesQuery.reduce((sum, p) => sum + n(p.outstanding_amount), 0)
   const netProfit = totalIncome - totalExpenses
+
+  console.log("💰 FINAL CALCULATIONS:")
+  console.log(`  Total Sales: ${totalSales.toFixed(2)} (from ${saleAmounts.size} unique sales)`)
+  console.log(`  Total Purchases: ${totalPurchases.toFixed(2)} (from ${purchaseAmounts.size} unique purchases)`)
+  console.log(`  Amount Received: ${amountReceived.toFixed(2)}`)
+  console.log(`  Spends: ${spends.toFixed(2)}`)
 
   return {
     summary: {
@@ -1809,154 +1808,3 @@ export async function accountingHealthCheck(deviceId: number) {
 }
 
 
-export async function debugTransactionComparison(deviceId: number, dateFrom: Date, dateTo: Date) {
-  try {
-    await createFinancialTransactionsTable()
-
-    const fromDateStr = `${dateFrom.getFullYear()}-${String(dateFrom.getMonth() + 1).padStart(2, "0")}-${String(dateFrom.getDate()).padStart(2, "0")} 00:00:00`
-    const toDateStr = `${dateTo.getFullYear()}-${String(dateTo.getMonth() + 1).padStart(2, "0")}-${String(dateTo.getDate()).padStart(2, "0")} 23:59:59`
-
-    console.log("🔍 DEBUGGING TRANSACTION DATA")
-    console.log("Date Range:", fromDateStr, "to", toDateStr)
-
-    // Get all transactions in date range
-    const transactions = await sql`
-      SELECT 
-        id,
-        transaction_type,
-        reference_type,
-        reference_id,
-        amount,
-        received_amount,
-        cost_amount,
-        debit_amount,
-        credit_amount,
-        status,
-        description,
-        transaction_date,
-        created_at
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
-      ORDER BY transaction_date DESC, id DESC
-    `
-
-    console.log(`\n📊 Found ${transactions.length} transactions\n`)
-
-    // Group by transaction type
-    const grouped = transactions.reduce((acc: any, tx: any) => {
-      const type = tx.transaction_type
-      if (!acc[type]) {
-        acc[type] = {
-          count: 0,
-          totalAmount: 0,
-          totalReceived: 0,
-          totalCost: 0,
-          totalDebit: 0,
-          totalCredit: 0,
-          transactions: []
-        }
-      }
-      acc[type].count++
-      acc[type].totalAmount += Number(tx.amount) || 0
-      acc[type].totalReceived += Number(tx.received_amount) || 0
-      acc[type].totalCost += Number(tx.cost_amount) || 0
-      acc[type].totalDebit += Number(tx.debit_amount) || 0
-      acc[type].totalCredit += Number(tx.credit_amount) || 0
-      acc[type].transactions.push(tx)
-      return acc
-    }, {})
-
-    // Print summary by type
-    console.log("📈 TRANSACTION SUMMARY BY TYPE:\n")
-    Object.entries(grouped).forEach(([type, data]: [string, any]) => {
-      console.log(`${type.toUpperCase()}:`)
-      console.log(`  Count: ${data.count}`)
-      console.log(`  Total Amount: ${data.totalAmount.toFixed(2)}`)
-      console.log(`  Total Received: ${data.totalReceived.toFixed(2)}`)
-      console.log(`  Total Cost: ${data.totalCost.toFixed(2)}`)
-      console.log(`  Total Debit: ${data.totalDebit.toFixed(2)}`)
-      console.log(`  Total Credit: ${data.totalCredit.toFixed(2)}`)
-      console.log()
-    })
-
-    // Calculate expected values
-    let expectedSales = 0
-    let expectedMoneyIn = 0
-    let expectedMoneyOut = 0
-    let expectedCogs = 0
-
-    const saleTxs = transactions.filter((t: any) => t.transaction_type === 'sale')
-    const saleIds = new Set()
-    
-    saleTxs.forEach((tx: any) => {
-      if (!saleIds.has(tx.reference_id)) {
-        saleIds.add(tx.reference_id)
-        expectedSales += Number(tx.amount) || 0
-        expectedMoneyIn += Number(tx.received_amount) || 0
-        expectedCogs += Number(tx.cost_amount) || 0
-      }
-    })
-
-    const purchaseTxs = transactions.filter((t: any) => t.transaction_type === 'purchase')
-    purchaseTxs.forEach((tx: any) => {
-      expectedMoneyOut += Number(tx.received_amount) || 0
-    })
-
-    const manualTxs = transactions.filter((t: any) => t.transaction_type === 'manual')
-    manualTxs.forEach((tx: any) => {
-      expectedMoneyIn += Number(tx.credit_amount) || 0
-      expectedMoneyOut += Number(tx.debit_amount) || 0
-    })
-
-    const supplierPaymentTxs = transactions.filter((t: any) => t.transaction_type === 'supplier_payment')
-    supplierPaymentTxs.forEach((tx: any) => {
-      expectedMoneyOut += Number(tx.debit_amount) || 0
-    })
-
-    const adjustmentTxs = transactions.filter((t: any) => t.transaction_type === 'adjustment')
-    adjustmentTxs.forEach((tx: any) => {
-      if (tx.description?.includes('Sale')) {
-        expectedMoneyIn += Number(tx.received_amount) || Number(tx.credit_amount) || 0
-      } else if (tx.description?.includes('Purchase')) {
-        expectedMoneyOut += Number(tx.received_amount) || Number(tx.debit_amount) || 0
-      }
-    })
-
-    console.log("💰 EXPECTED CALCULATIONS:")
-    console.log(`  Expected Sales: ${expectedSales.toFixed(2)}`)
-    console.log(`  Expected Money In: ${expectedMoneyIn.toFixed(2)}`)
-    console.log(`  Expected Money Out: ${expectedMoneyOut.toFixed(2)}`)
-    console.log(`  Expected COGS: ${expectedCogs.toFixed(2)}`)
-    console.log(`  Expected Profit: ${(expectedMoneyIn - expectedCogs - expectedMoneyOut).toFixed(2)}`)
-
-    // Return detailed transaction list
-    return {
-      totalCount: transactions.length,
-      grouped,
-      expected: {
-        sales: expectedSales,
-        moneyIn: expectedMoneyIn,
-        moneyOut: expectedMoneyOut,
-        cogs: expectedCogs,
-        profit: expectedMoneyIn - expectedCogs - expectedMoneyOut
-      },
-      allTransactions: transactions.map((tx: any) => ({
-        id: tx.id,
-        type: tx.transaction_type,
-        ref: `${tx.reference_type}#${tx.reference_id}`,
-        amount: Number(tx.amount),
-        received: Number(tx.received_amount),
-        cost: Number(tx.cost_amount),
-        debit: Number(tx.debit_amount),
-        credit: Number(tx.credit_amount),
-        description: tx.description,
-        date: tx.transaction_date,
-        created: tx.created_at
-      }))
-    }
-  } catch (error) {
-    console.error("Error in debugTransactionComparison:", error)
-    return { error: error.message }
-  }
-}
