@@ -801,7 +801,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       printWindow.document.close()
 
       toast.success("Print preview opened. Use your browser's print function to save as PDF.")
-    } catch (error) {
+    } catch (error) {g
       console.error("Error opening print preview:", error)
       toast.error("Failed to open print preview")
     }
@@ -879,41 +879,58 @@ const filteredTransactions =
 const isDataLoading = isLoading && !financialData
 
 
-// CORRECTED: Profit Calculation (should match cash impact logic)
 const getProfit = (transaction: any) => {
   if (!transaction) return 0
   
   const type = transaction.type?.toLowerCase()
   const description = transaction.description || ""
-  const received = n(transaction.received)
+  const amount = n(transaction.amount)
   const cost = n(transaction.cost)
+  const received = n(transaction.received)
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
 
-  // For sales and sale adjustments, profit = cash impact
-  if (type === 'sale' || (type === 'adjustment' && description.includes('Sale'))) {
-    return getCashImpact(transaction)
+  console.log('=== PROFIT CALCULATION ===')
+  console.log('Transaction:', {
+    type,
+    description,
+    amount,
+    received,
+    cost,
+    credit,
+    debit
+  })
+
+  // 1. SALES - Profit = Sale Amount - Cost
+  if (type === 'sale') {
+    const profit = amount - cost
+    console.log('Sale Profit:', { amount, cost, profit })
+    return profit
   }
   
-  // For purchases and related transactions - NO PROFIT IMPACT
-  if (type === 'purchase' || 
-      (type === 'adjustment' && description.includes('Purchase')) ||
-      type === 'supplier_payment') {
-    return 0
+  // 2. SALE ADJUSTMENTS - Additional revenue (price increases)
+  if (type === 'adjustment' && description.includes('Sale')) {
+    const additionalMoneyIn = received > 0 ? received : credit
+    
+    // If adjustment has explicit cost, subtract it
+    if (cost > 0) {
+      const profit = additionalMoneyIn - cost
+      console.log('Sale Adjustment with cost:', { additionalMoneyIn, cost, profit })
+      return profit
+    }
+    
+    // For price adjustments without cost = pure profit
+    console.log('Sale Adjustment pure profit:', additionalMoneyIn)
+    return additionalMoneyIn
   }
   
-  // For manual transactions
-  if (type === 'manual') {
-    return credit - debit
-  }
+
   
-  // Default
-  return credit - debit
+  console.log('No profit impact for transaction type:', type)
+  return 0
 }
 
-// FIXED: Cash Impact - includes both sales profit AND purchase outflows
-// FIXED: Cash Impact for purchase adjustments - handle backend data structure
-// CORRECTED: Complete Cash Impact Calculation
+
 const getCashImpact = (transaction: any) => {
   if (!transaction) return 0
   
