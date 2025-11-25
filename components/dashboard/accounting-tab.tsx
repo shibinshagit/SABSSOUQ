@@ -1418,18 +1418,29 @@ const getAmountReceived = () => {
     const description = t.description || ""
     const received = n(t.received)
     const credit = n(t.credit)
+    const debit = n(t.debit)
     
     // For sales - count full received amount
     if (type === 'sale') {
-      totalReceived += received
+      totalReceived += Math.abs(received)
     }
-    // For sale adjustments - count full additional money received
+    // For sale adjustments - handle both positive additions and refunds
     else if (type === 'adjustment' && description.includes('Sale')) {
-      totalReceived += (received > 0 ? received : credit)
+      const adjustmentAmount = received > 0 ? received : credit
+      // If it's a refund (negative), it reduces money in
+      // If it's additional payment (positive), it increases money in
+      totalReceived += adjustmentAmount
     }
     // For purchase refunds - count full refund amount
     else if (type === 'adjustment' && description.includes('Purchase') && credit > 0) {
       totalReceived += credit
+    }
+    // For manual transactions - only count if net is positive (money coming in)
+    else if (type === 'manual') {
+      const netFlow = credit - debit
+      if (netFlow > 0) {
+        totalReceived += netFlow
+      }
     }
     // For other transactions - count credit amounts (money coming in)
     else if (credit > 0) {
@@ -1457,27 +1468,43 @@ const getSpends = () => {
     const description = t.description || ""
     const received = n(t.received)
     const debit = n(t.debit)
+    const credit = n(t.credit)
     
     // For purchases - count full amount spent
     if (type === 'purchase') {
-      totalSpends += received
+      totalSpends += Math.abs(received)
     }
     // For purchase adjustments (payments) - count additional payment
-    else if (type === 'adjustment' && description.includes('Purchase') && debit > 0) {
-      totalSpends += debit
+    else if (type === 'adjustment' && description.includes('Purchase')) {
+      // Handle both 'received' field and 'debit' field
+      const paymentAmount = received > 0 ? received : (debit > 0 ? debit : 0)
+      totalSpends += Math.abs(paymentAmount)
     }
     // For supplier payments - count full amount paid
     else if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
       totalSpends += Math.abs(debit)
     }
+    // For sale adjustments that are refunds (negative received)
+    else if (type === 'adjustment' && description.includes('Sale') && received < 0) {
+      // Refunds are money going out
+      totalSpends += Math.abs(received)
+    }
+    // For manual transactions - only count if net is negative (money going out)
+    else if (type === 'manual') {
+      const netFlow = credit - debit
+      if (netFlow < 0) {
+        totalSpends += Math.abs(netFlow)
+      }
+    }
     // For other transactions - count debit amounts (money going out)
     else if (debit > 0) {
-      totalSpends += debit
+      totalSpends += Math.abs(debit)
     }
   })
 
   return totalSpends
 }
+
 
 const getTotalSpends = () => {
   return getSpends()
