@@ -2,6 +2,9 @@
 
 import { sql } from "@/lib/db"
 
+
+
+
 // Create a simplified financial transactions table from scratch
 async function createFinancialTransactionsTable() {
   try {

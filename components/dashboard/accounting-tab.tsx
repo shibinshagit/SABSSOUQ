@@ -878,9 +878,8 @@ const filteredTransactions =
 
 const isDataLoading = isLoading && !financialData
 
-// FIXED: Profit calculation with proportional cost for partial payments
-// FIXED: Profit calculation - ONLY includes sales profit, excludes purchases
-// FIXED: Profit calculation - purchase adjustments should not affect profit
+
+// CORRECTED: Profit Calculation (should match cash impact logic)
 const getProfit = (transaction: any) => {
   if (!transaction) return 0
   
@@ -890,84 +889,31 @@ const getProfit = (transaction: any) => {
   const cost = n(transaction.cost)
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
-  
-  // For sales - profit = money received - cost
-  if (type === 'sale') {
-    return received - cost
+
+  // For sales and sale adjustments, profit = cash impact
+  if (type === 'sale' || (type === 'adjustment' && description.includes('Sale'))) {
+    return getCashImpact(transaction)
   }
   
-  // For sale adjustments (additional payments)
-  if (type === 'adjustment' && description.includes('Sale')) {
-    const additionalMoneyIn = received || credit
-    const saleId = extractIdFromDescription(description)
-    
-    if (saleId) {
-      // Find the original sale
-      const originalSale = financialData?.transactions?.find(
-        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
-      )
-      
-      if (originalSale) {
-        const totalBill = n(originalSale.amount)
-        const alreadyReceived = n(originalSale.received)
-        const originalCost = n(originalSale.cost)
-        
-        // EXTRACT COGS from description if available
-        let extractedCost = 0
-        const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-        if (costMatch) {
-          extractedCost = n(costMatch[1])
-        }
-        
-        // If we have extracted COGS from description, use that
-        if (extractedCost > 0) {
-          return additionalMoneyIn - extractedCost
-        }
-        
-        // If original sale has cost, use proportional calculation
-        if (originalCost > 0 && alreadyReceived > 0) {
-          const costPerMoneyUnit = originalCost / alreadyReceived
-          const costForThisPayment = additionalMoneyIn * costPerMoneyUnit
-          return additionalMoneyIn - costForThisPayment
-        }
-        
-        // If no cost data available, assume 50% profit margin
-        return additionalMoneyIn * 0.5
-      }
-    }
-    
-    // If no original sale found, try to extract COGS from description
-    const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-    if (costMatch) {
-      const extractedCost = n(costMatch[1])
-      return additionalMoneyIn - extractedCost
-    }
-    
-    // Final fallback: assume 50% profit margin
-    return additionalMoneyIn * 0.5
-  }
-  
-  // For purchases - NO PROFIT IMPACT (purchases don't affect profit, only cash)
-  if (type === 'purchase') {
+  // For purchases and related transactions - NO PROFIT IMPACT
+  if (type === 'purchase' || 
+      (type === 'adjustment' && description.includes('Purchase')) ||
+      type === 'supplier_payment') {
     return 0
   }
   
-  // For purchase adjustments - NO PROFIT IMPACT (only cash impact)
-  if (type === 'adjustment' && description.includes('Purchase')) {
-    return 0 // Purchase adjustments don't affect profit
+  // For manual transactions
+  if (type === 'manual') {
+    return credit - debit
   }
   
-  // For supplier payments - NO PROFIT IMPACT
-  if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return 0
-  }
-  
-  // Default for other transactions
+  // Default
   return credit - debit
 }
 
 // FIXED: Cash Impact - includes both sales profit AND purchase outflows
 // FIXED: Cash Impact for purchase adjustments - handle backend data structure
+// CORRECTED: Complete Cash Impact Calculation
 const getCashImpact = (transaction: any) => {
   if (!transaction) return 0
   
@@ -977,107 +923,125 @@ const getCashImpact = (transaction: any) => {
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
   const cost = n(transaction.cost)
+  const amount = n(transaction.amount)
   
-  // For sales - cash impact = profit only (received - cost)
+  console.log('=== CASH IMPACT CALCULATION ===')
+  console.log('Transaction:', {
+    type,
+    description,
+    amount,
+    received,
+    cost,
+    credit,
+    debit
+  })
+
+  // 1. SALES - Cash impact = money received - cost of goods sold
   if (type === 'sale') {
-    return received - cost
+    const cashImpact = received - cost
+    console.log('Sale - Cash Impact:', { received, cost, cashImpact })
+    return cashImpact
   }
   
-  // For sale adjustments - cash impact = profit only (received - proportional cost)
+  // 2. SALE ADJUSTMENTS - Most are price changes = pure profit
   if (type === 'adjustment' && description.includes('Sale')) {
     const additionalMoneyIn = received || credit
-    const saleId = extractIdFromDescription(description)
     
-    if (saleId) {
-      // Find the original sale
-      const originalSale = financialData?.transactions?.find(
-        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
-      )
-      
-      if (originalSale) {
-        const totalBill = n(originalSale.amount)
-        const alreadyReceived = n(originalSale.received)
-        const originalCost = n(originalSale.cost)
+    // If transaction has explicit cost data, use it
+    if (cost > 0) {
+      const cashImpact = additionalMoneyIn - cost
+      console.log('Sale Adjustment with cost data:', { additionalMoneyIn, cost, cashImpact })
+      return cashImpact
+    }
+    
+    // Check if this is a QUANTITY change (only case where we need proportional cost)
+    const isQuantityChange = description.includes('quantity') || 
+                            description.includes('qty') ||
+                            /quantity.*(changed|increased|decreased)/i.test(description)
+    
+    if (isQuantityChange) {
+      const saleId = extractIdFromDescription(description)
+      if (saleId) {
+        const originalSale = financialData?.transactions?.find(
+          st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+        )
         
-        // EXTRACT COGS from description if available
-        let extractedCost = 0
-        const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-        if (costMatch) {
-          extractedCost = n(costMatch[1])
+        if (originalSale) {
+          const originalCost = n(originalSale.cost)
+          const originalQuantity = n(originalSale.quantity) || 1
+          const costPerUnit = originalCost / originalQuantity
+          
+          // Extract quantity change from description
+          const quantityMatch = description.match(/quantity.*?(\d+)/i) || 
+                               description.match(/qty.*?(\d+)/i) ||
+                               description.match(/from.*?(\d+).*?to.*?(\d+)/i)
+          
+          if (quantityMatch) {
+            let quantityChange = 0
+            if (quantityMatch[2]) {
+              // "from X to Y" format
+              const newQuantity = n(quantityMatch[2])
+              quantityChange = newQuantity - originalQuantity
+            } else {
+              // Simple quantity mention
+              quantityChange = n(quantityMatch[1]) - originalQuantity
+            }
+            
+            if (quantityChange > 0) {
+              const additionalCost = quantityChange * costPerUnit
+              const cashImpact = additionalMoneyIn - additionalCost
+              console.log('Quantity Change Adjustment:', {
+                additionalMoneyIn, quantityChange, costPerUnit, additionalCost, cashImpact
+              })
+              return cashImpact
+            }
+          }
         }
-        
-        // If we have extracted COGS from description, use that
-        if (extractedCost > 0) {
-          return additionalMoneyIn - extractedCost
-        }
-        
-        // If original sale has cost, use proportional calculation
-        if (originalCost > 0 && alreadyReceived > 0) {
-          const costPerMoneyUnit = originalCost / alreadyReceived
-          const costForThisPayment = additionalMoneyIn * costPerMoneyUnit
-          return additionalMoneyIn - costForThisPayment
-        }
-        
-        // If no cost data available, assume 50% profit margin
-        return additionalMoneyIn * 0.5
       }
     }
     
-    // If no original sale found, try to extract COGS from description
-    const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-    if (costMatch) {
-      const extractedCost = n(costMatch[1])
-      return additionalMoneyIn - extractedCost
-    }
-    
-    // Final fallback: assume 50% profit margin
-    return additionalMoneyIn * 0.5
+    // DEFAULT: For price changes and unknown adjustments = pure profit
+    // Price changes don't affect cost, so additional money = pure profit
+    console.log('Price Change Adjustment - Pure Profit:', additionalMoneyIn)
+    return additionalMoneyIn
   }
   
-  // For purchases - cash impact is full amount spent (negative)
+  // 3. PURCHASES - Cash impact = money spent (negative)
   if (type === 'purchase') {
-    return -received
+    const cashImpact = -received
+    console.log('Purchase - Cash Impact:', { received, cashImpact })
+    return cashImpact
   }
   
-  // For purchase adjustments - cash impact is money paid out (negative)
+  // 4. PURCHASE ADJUSTMENTS - Additional payments (negative)
   if (type === 'adjustment' && description.includes('Purchase')) {
-    // If debit amount is available, use it (money going out)
-    if (debit > 0) {
-      return -debit
-    }
-    // If received amount is available, use it
-    else if (received > 0) {
-      return -received
-    }
-    // Extract payment amount from description as fallback
-    else {
-      const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i) || 
-                          description.match(/paid.*?([\d.]+)/i)
-      if (paymentMatch) {
-        const paymentAmount = n(paymentMatch[1])
-        return -paymentAmount
-      }
-    }
-    return 0
+    const additionalPayment = received || debit
+    const cashImpact = -additionalPayment
+    console.log('Purchase Adjustment - Cash Impact:', { additionalPayment, cashImpact })
+    return cashImpact
   }
   
-  // For purchase adjustments with "Edited" in description - extract payment amount
-  if (type === 'adjustment' && description.includes('Edited') && description.includes('Payment increased by')) {
-    const paymentMatch = description.match(/Payment increased by\s*([\d.]+)/i)
-    if (paymentMatch) {
-      const paymentAmount = n(paymentMatch[1])
-      return -paymentAmount // Negative because it's money going out
-    }
-  }
-  
-  // For supplier payments - cash impact is full amount paid out (negative)
+  // 5. SUPPLIER PAYMENTS - Cash impact = money paid out (negative)
   if (type === 'supplier_payment' || description.toLowerCase().includes('supplier payment')) {
-    return -Math.abs(debit)
+    const paymentAmount = Math.abs(debit)
+    const cashImpact = -paymentAmount
+    console.log('Supplier Payment - Cash Impact:', { paymentAmount, cashImpact })
+    return cashImpact
   }
   
-  // For manual/other transactions - cash impact = actual net money movement
-  return credit - debit
+  // 6. MANUAL TRANSACTIONS - Net money movement
+  if (type === 'manual') {
+    const cashImpact = credit - debit
+    console.log('Manual Transaction - Cash Impact:', { credit, debit, cashImpact })
+    return cashImpact
+  }
+  
+  // 7. DEFAULT - For any other transaction types
+  const cashImpact = credit - debit
+  console.log('Default Calculation - Cash Impact:', { credit, debit, cashImpact })
+  return cashImpact
 }
+
 
 // FIXED: Total Cash Impact
 const getTotalCashImpact = () => {
@@ -1093,6 +1057,7 @@ const getTotalCashImpact = () => {
 
   return totalCashImpact
 }
+
 
 // NEW: Get actual money in/out amounts (not profit)
 const getMoneyFlowAmount = (transaction: any) => {
@@ -1321,6 +1286,7 @@ const getFilteredCogs = () => {
   })
 
   return totalCogs
+
 }
 
 // Calculate remaining amount for credit sales and purchases
@@ -1534,6 +1500,7 @@ const getSalesTotal = () => {
       saleAmounts.set(t.sale_id, n(t.amount))
     }
   })
+
   
   // Second pass: process adjustments to update the total amounts
   filteredTransactions.forEach((t) => {
