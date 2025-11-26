@@ -878,7 +878,7 @@ const filteredTransactions =
 
 const isDataLoading = isLoading && !financialData
 
-// FIXED: Profit calculation - backend stores proportional cost for partial payments
+
 const getProfit = (transaction: any) => {
   if (!transaction) return 0
   
@@ -901,115 +901,34 @@ const getProfit = (transaction: any) => {
     debit
   })
 
-  // 1. SALES - Backend handles proportional cost calculation
+  // 1. SALES - Profit = Sale Amount - Cost
   if (type === 'sale') {
-    // For credit sales (received = 0), profit = 0
-    if (received === 0) {
-      console.log('Credit Sale - No profit yet (no payment received)')
-      return 0
-    }
-    
-    // Backend stores the proportional cost already
-    // So profit = received - cost (cost is already proportional)
-    const profit = received - cost
-    console.log('Sale Profit:', { received, cost, profit })
+    const profit = amount - cost
+    console.log('Sale Profit:', { amount, cost, profit })
     return profit
   }
   
-  // 2. SALE ADJUSTMENTS - Additional payments on existing sales
+  // 2. SALE ADJUSTMENTS - Additional revenue (price increases)
   if (type === 'adjustment' && description.includes('Sale')) {
-    // Handle refunds
-    if (description.toLowerCase().includes('refund') || 
-        description.toLowerCase().includes('payment reduced')) {
-      const refundMatch = description.match(/refund:?\s*(\d+)/i) || 
-                         description.match(/reduced.*?(\d+)/i)
-      if (refundMatch) {
-        const refundAmount = n(refundMatch[1])
-        console.log('Refund - negative profit:', -refundAmount)
-        return -refundAmount
-      } else if (received < 0) {
-        console.log('Refund (from received):', received)
-        return received
-      }
-    }
-    
     const additionalMoneyIn = received > 0 ? received : credit
     
-    // If adjustment has explicit cost data, use it (backend calculated it)
+    // If adjustment has explicit cost, subtract it
     if (cost > 0) {
       const profit = additionalMoneyIn - cost
       console.log('Sale Adjustment with cost:', { additionalMoneyIn, cost, profit })
       return profit
     }
     
-    // Otherwise find the original sale to calculate proportional cost
-    const saleId = extractIdFromDescription(description)
-    if (saleId) {
-      const originalSale = financialData?.transactions?.find(
-        st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
-      )
-      
-      if (originalSale) {
-        const originalAmount = n(originalSale.amount)
-        const originalCost = n(originalSale.cost)
-        
-        // Need to get the TOTAL original cost, not the proportional one
-        // Calculate by reverse engineering if we know the received amount
-        const originalReceived = n(originalSale.received)
-        let fullCost = originalCost
-        
-        if (originalReceived > 0 && originalReceived < originalAmount) {
-          // Original was partial payment, so cost is proportional
-          // Reverse calculate: full_cost = (cost * amount) / received
-          fullCost = (originalCost * originalAmount) / originalReceived
-          console.log('Calculated full cost from proportional:', {
-            originalCost,
-            originalAmount,
-            originalReceived,
-            fullCost
-          })
-        }
-        
-        if (originalAmount > 0) {
-          const proportionalCost = (fullCost * additionalMoneyIn) / originalAmount
-          const profit = additionalMoneyIn - proportionalCost
-          console.log('Sale Adjustment (proportional):', {
-            additionalMoneyIn,
-            originalAmount,
-            fullCost,
-            proportionalCost,
-            profit
-          })
-          return profit
-        }
-      }
-    }
-    
-    // Fallback: Price increases are pure profit
+    // For price adjustments without cost = pure profit
     console.log('Sale Adjustment pure profit:', additionalMoneyIn)
     return additionalMoneyIn
   }
   
-  // 3. PURCHASES - No profit impact
-  if (type === 'purchase' || 
-      (type === 'adjustment' && description.includes('Purchase')) ||
-      type === 'supplier_payment') {
-    console.log('No profit impact for purchase/supplier payment')
-    return 0
-  }
-  
-  // 4. MANUAL TRANSACTIONS - Net cash flow
-  if (type === 'manual' || type === 'debit') {
-    const profit = credit - debit
-    console.log('Manual transaction profit:', profit)
-    return profit
-  }
-  
-  // 5. DEFAULT
-  console.log('Default profit calculation:', credit - debit)
-  return credit - debit
-}
 
+  
+  console.log('No profit impact for transaction type:', type)
+  return 0
+}
 
 
 const getCashImpact = (transaction: any) => {
