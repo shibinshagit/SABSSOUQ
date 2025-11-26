@@ -889,6 +889,7 @@ const getProfit = (transaction: any) => {
   const received = n(transaction.received)
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
+  const status = transaction.status?.toLowerCase()
 
   console.log('=== PROFIT CALCULATION ===')
   console.log('Transaction:', {
@@ -898,37 +899,84 @@ const getProfit = (transaction: any) => {
     received,
     cost,
     credit,
-    debit
+    debit,
+    status
   })
 
-  // 1. SALES - Profit = Sale Amount - Cost
+  // 1. SALES - Use same logic as cash impact for consistency
   if (type === 'sale') {
-    const profit = amount - cost
-    console.log('Sale Profit:', { amount, cost, profit })
+    const profit = received - cost
+    console.log('Sale Profit:', { received, cost, profit })
     return profit
   }
   
-  // 2. SALE ADJUSTMENTS - Additional revenue (price increases)
+  // 2. SALE ADJUSTMENTS - Use same logic as cash impact
   if (type === 'adjustment' && description.includes('Sale')) {
-    const additionalMoneyIn = received > 0 ? received : credit
+    const additionalMoneyIn = received || credit
     
-    // If adjustment has explicit cost, subtract it
+    // If transaction has explicit cost data, use it
     if (cost > 0) {
       const profit = additionalMoneyIn - cost
-      console.log('Sale Adjustment with cost:', { additionalMoneyIn, cost, profit })
+      console.log('Sale Adjustment with cost data:', { additionalMoneyIn, cost, profit })
       return profit
     }
     
-    // For price adjustments without cost = pure profit
-    console.log('Sale Adjustment pure profit:', additionalMoneyIn)
+    // Check if this is a QUANTITY change (only case where we need proportional cost)
+    const isQuantityChange = description.includes('quantity') || 
+                            description.includes('qty') ||
+                            /quantity.*(changed|increased|decreased)/i.test(description)
+    
+    if (isQuantityChange) {
+      const saleId = extractIdFromDescription(description)
+      if (saleId) {
+        const originalSale = financialData?.transactions?.find(
+          st => st && st.sale_id === saleId && st.type?.toLowerCase() === 'sale'
+        )
+        
+        if (originalSale) {
+          const originalCost = n(originalSale.cost)
+          const originalQuantity = n(originalSale.quantity) || 1
+          const costPerUnit = originalCost / originalQuantity
+          
+          // Extract quantity change from description
+          const quantityMatch = description.match(/quantity.*?(\d+)/i) || 
+                               description.match(/qty.*?(\d+)/i) ||
+                               description.match(/from.*?(\d+).*?to.*?(\d+)/i)
+          
+          if (quantityMatch) {
+            let quantityChange = 0
+            if (quantityMatch[2]) {
+              // "from X to Y" format
+              const newQuantity = n(quantityMatch[2])
+              quantityChange = newQuantity - originalQuantity
+            } else {
+              // Simple quantity mention
+              quantityChange = n(quantityMatch[1]) - originalQuantity
+            }
+            
+            if (quantityChange > 0) {
+              const additionalCost = quantityChange * costPerUnit
+              const profit = additionalMoneyIn - additionalCost
+              console.log('Quantity Change Adjustment Profit:', {
+                additionalMoneyIn, quantityChange, costPerUnit, additionalCost, profit
+              })
+              return profit
+            }
+          }
+        }
+      }
+    }
+    
+    // DEFAULT: For price changes and unknown adjustments = pure profit
+    console.log('Price Change Adjustment - Pure Profit:', additionalMoneyIn)
     return additionalMoneyIn
   }
   
-
-  
+  // 3. PURCHASES & OTHER TRANSACTIONS - No profit impact
   console.log('No profit impact for transaction type:', type)
   return 0
 }
+
 
 
 const getCashImpact = (transaction: any) => {
