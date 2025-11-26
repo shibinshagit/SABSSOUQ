@@ -890,38 +890,45 @@ const getProfit = (transaction: any) => {
   const credit = n(transaction.credit)
   const debit = n(transaction.debit)
 
-  // ONLY count sales and sale adjustments
-  if (type === 'sale' || (type === 'adjustment' && description.includes('Sale'))) {
-    const moneyReceived = received > 0 ? received : credit
-    
-    if (moneyReceived === 0) return 0
-    
-    // SIMPLE RULE: Use the cost field from the transaction
-    // This is the most reliable approach
-    let actualCost = cost
-    
-    // If no cost in transaction, try to extract from description
-    if (actualCost === 0 && description.includes('COGS')) {
-      const costMatch = description.match(/COGS recognized:?\s*([\d.]+)/i)
-      if (costMatch) actualCost = n(costMatch[1])
-    }
-    
-    // Final fallback: 50% margin
-    if (actualCost === 0) {
-      actualCost = moneyReceived * 0.5
-    }
-    
-    const profit = moneyReceived - actualCost
-    console.log(`Profit for ${type}:`, { moneyReceived, actualCost, profit })
+  console.log('=== PROFIT CALCULATION ===')
+  console.log('Transaction:', {
+    type,
+    description,
+    amount,
+    received,
+    cost,
+    credit,
+    debit
+  })
+
+  // 1. SALES - Profit = Sale Amount - Cost
+  if (type === 'sale') {
+    const profit = amount - cost
+    console.log('Sale Profit:', { amount, cost, profit })
     return profit
   }
   
+  // 2. SALE ADJUSTMENTS - Additional revenue (price increases)
+  if (type === 'adjustment' && description.includes('Sale')) {
+    const additionalMoneyIn = received > 0 ? received : credit
+    
+    // If adjustment has explicit cost, subtract it
+    if (cost > 0) {
+      const profit = additionalMoneyIn - cost
+      console.log('Sale Adjustment with cost:', { additionalMoneyIn, cost, profit })
+      return profit
+    }
+    
+    // For price adjustments without cost = pure profit
+    console.log('Sale Adjustment pure profit:', additionalMoneyIn)
+    return additionalMoneyIn
+  }
+  
+
+  
+  console.log('No profit impact for transaction type:', type)
   return 0
 }
-
-
-
-
 
 
 const getCashImpact = (transaction: any) => {
