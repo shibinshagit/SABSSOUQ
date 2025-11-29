@@ -1074,28 +1074,36 @@ export async function getAccountingBalances(
 
     await createFinancialTransactionsTable();
 
-    // --- FIX: Convert to real UTC boundaries ---
-    const openingUTCStart = new Date(Date.UTC(
-      openingDate.getFullYear(),
-      openingDate.getMonth(),
-      openingDate.getDate(),
-      0, 0, 0
-    ));
+    // ===== TIMEZONE FIX: Use local date boundaries without UTC conversion =====
+    // The dates coming from the client are already in UAE time
+    // We need to query the database using these exact date boundaries
+    // WITHOUT converting to UTC (which would shift by 4 hours)
+    
+    // Extract date components from the input dates (already in local time)
+    const openingYear = openingDate.getFullYear();
+    const openingMonth = openingDate.getMonth();
+    const openingDay = openingDate.getDate();
+    
+    const closingYear = (closingDate || openingDate).getFullYear();
+    const closingMonth = (closingDate || openingDate).getMonth();
+    const closingDay = (closingDate || openingDate).getDate();
+    
+    // Create date boundaries in local time (00:00:00 and 23:59:59)
+    const openingLocalStart = new Date(openingYear, openingMonth, openingDay, 0, 0, 0, 0);
+    const closingLocalEnd = new Date(closingYear, closingMonth, closingDay, 23, 59, 59, 999);
 
-    const closingUTCEnd = new Date(Date.UTC(
-      (closingDate || openingDate).getFullYear(),
-      (closingDate || openingDate).getMonth(),
-      (closingDate || openingDate).getDate(),
-      23, 59, 59
-    ));
+    // Format dates for SQL WITHOUT timezone conversion
+    // This preserves the local time boundaries
+    const openingDateStr = formatDateForSQL(openingLocalStart);
+    const closingDateStr = formatDateForSQL(closingLocalEnd);
 
-    // Format for SQL (Postgres-compatible)
-    const openingDateStr = openingUTCStart.toISOString().replace("T", " ").replace("Z", "");
-    const closingDateStr = closingUTCEnd.toISOString().replace("T", " ").replace("Z", "");
+    console.log("Local time boundaries (UAE):", { 
+      openingDateStr, 
+      closingDateStr,
+      note: "Using device local time - no UTC conversion"
+    });
 
-    console.log("UTC date strings:", { openingDateStr, closingDateStr });
-
-    // --- SQL QUERIES (no timezone interference now) ---
+    // === Query 1: Opening Balance (all transactions BEFORE opening date) ===
     const openingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) AS total_credits,
@@ -1105,6 +1113,7 @@ export async function getAccountingBalances(
         AND transaction_date < ${openingDateStr}::timestamp
     `;
 
+    // === Query 2: Closing Balance (all transactions UP TO AND INCLUDING closing date) ===
     const closingTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) AS total_credits,
@@ -1114,6 +1123,7 @@ export async function getAccountingBalances(
         AND transaction_date <= ${closingDateStr}::timestamp
     `;
 
+    // === Query 3: Period Transactions (transactions WITHIN the date range) ===
     const periodTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) AS total_credits,
@@ -1124,7 +1134,7 @@ export async function getAccountingBalances(
         AND transaction_date <= ${closingDateStr}::timestamp
     `;
 
-    // Numbers
+    // Extract and convert to numbers
     const openingCredits = Number(openingTransactions[0]?.total_credits) || 0;
     const openingDebits  = Number(openingTransactions[0]?.total_debits)  || 0;
     const closingCredits = Number(closingTransactions[0]?.total_credits) || 0;
@@ -1132,27 +1142,28 @@ export async function getAccountingBalances(
     const periodCredits  = Number(periodTransactions[0]?.total_credits)  || 0;
     const periodDebits   = Number(periodTransactions[0]?.total_debits)   || 0;
 
-    // Calculations
+    // Calculate balances
     const openingBalance = openingCredits - openingDebits;
     const closingBalance = closingCredits - closingDebits;
     const periodNet = periodCredits - periodDebits;
 
-    // Verify
+    // Verification: Opening + Period Net should equal Closing
     const calculatedClosing = openingBalance + periodNet;
     const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01;
 
-    console.log("Verification:", {
-      openingBalance,
-      periodNet,
-      calculatedClosing,
-      actualClosingBalance: closingBalance,
-      matches: balanceMatches
+    console.log("✅ Balance calculation:", {
+      openingBalance: openingBalance.toFixed(2),
+      periodNet: periodNet.toFixed(2),
+      calculatedClosing: calculatedClosing.toFixed(2),
+      actualClosingBalance: closingBalance.toFixed(2),
+      matches: balanceMatches ? "✓" : "✗"
     });
 
     if (!balanceMatches) {
-      console.warn("Balance verification failed", {
-        expected: calculatedClosing,
-        actual: closingBalance
+      console.warn("⚠️ Balance verification FAILED", {
+        expected: calculatedClosing.toFixed(2),
+        actual: closingBalance.toFixed(2),
+        difference: (calculatedClosing - closingBalance).toFixed(2)
       });
     }
 
@@ -1169,7 +1180,7 @@ export async function getAccountingBalances(
     };
 
   } catch (error) {
-    console.error("Error getting balances:", error);
+    console.error("❌ Error getting balances:", error);
     return {
       openingBalance: 0,
       closingBalance: 0,
@@ -1182,4 +1193,18 @@ export async function getAccountingBalances(
       closingDebits: 0
     };
   }
+}
+
+// Helper function to format dates for SQL (preserves local time)
+function formatDateForSQL(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  const seconds = String(date.getSeconds()).padStart(2, '0');
+  
+  // Returns format: "YYYY-MM-DD HH:MM:SS"
+  // This is treated as local time by PostgreSQL
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }
