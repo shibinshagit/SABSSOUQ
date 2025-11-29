@@ -1063,124 +1063,126 @@ function getAccountType(transactionType: string): string {
   }
 }
 
-
-export async function getAccountingBalances(
-  deviceId: number,
-  openingDate: Date,
-  closingDate?: Date
-) {
+// FIXED: Get opening and closing balances based on actual transaction data with date range
+// FIXED: Get opening and closing balances based on actual transaction data with date range
+export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
   try {
-    console.log("Raw client dates:", { openingDate, closingDate });
+    console.log(
+      "Getting accounting balances for device:",
+      deviceId,
+      "opening date:",
+      openingDate,
+      "closing date:",
+      closingDate,
+    )
 
-    await createFinancialTransactionsTable();
+    // Ensure table exists
+    await createFinancialTransactionsTable()
 
-    // ===== TIMEZONE FIX: Use local date boundaries without UTC conversion =====
-    // The dates coming from the client are already in UAE time
-    // We need to query the database using these exact date boundaries
-    // WITHOUT converting to UTC (which would shift by 4 hours)
-    
-    // Extract date components from the input dates (already in local time)
-    const openingYear = openingDate.getFullYear();
-    const openingMonth = openingDate.getMonth();
-    const openingDay = openingDate.getDate();
-    
-    const closingYear = (closingDate || openingDate).getFullYear();
-    const closingMonth = (closingDate || openingDate).getMonth();
-    const closingDay = (closingDate || openingDate).getDate();
-    
-    // Create date boundaries in local time (00:00:00 and 23:59:59)
-    const openingLocalStart = new Date(openingYear, openingMonth, openingDay, 0, 0, 0, 0);
-    const closingLocalEnd = new Date(closingYear, closingMonth, closingDay, 23, 59, 59, 999);
+    // Format dates properly without timezone conversion
+    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 00:00:00`
 
-    // Format dates for SQL WITHOUT timezone conversion
-    // This preserves the local time boundaries
-    const openingDateStr = formatDateForSQL(openingLocalStart);
-    const closingDateStr = formatDateForSQL(closingLocalEnd);
-
-    console.log("Local time boundaries (UAE):", { 
-      openingDateStr, 
-      closingDateStr,
-      note: "Using device local time - no UTC conversion"
-    });
-
-    // === Query 1: Opening Balance (all transactions BEFORE opening date) ===
-    const openingTransactions = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) AS total_credits,
-        COALESCE(SUM(debit_amount), 0) AS total_debits
-      FROM financial_transactions
-      WHERE device_id = ${deviceId}
-        AND transaction_date < ${openingDateStr}::timestamp
-    `;
-
-    // === Query 2: Closing Balance (all transactions UP TO AND INCLUDING closing date) ===
-    const closingTransactions = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) AS total_credits,
-        COALESCE(SUM(debit_amount), 0) AS total_debits
-      FROM financial_transactions
-      WHERE device_id = ${deviceId}
-        AND transaction_date <= ${closingDateStr}::timestamp
-    `;
-
-    // === Query 3: Period Transactions (transactions WITHIN the date range) ===
-    const periodTransactions = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) AS total_credits,
-        COALESCE(SUM(debit_amount), 0) AS total_debits
-      FROM financial_transactions
-      WHERE device_id = ${deviceId}
-        AND transaction_date >= ${openingDateStr}::timestamp
-        AND transaction_date <= ${closingDateStr}::timestamp
-    `;
-
-    // Extract and convert to numbers
-    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0;
-    const openingDebits  = Number(openingTransactions[0]?.total_debits)  || 0;
-    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0;
-    const closingDebits  = Number(closingTransactions[0]?.total_debits)  || 0;
-    const periodCredits  = Number(periodTransactions[0]?.total_credits)  || 0;
-    const periodDebits   = Number(periodTransactions[0]?.total_debits)   || 0;
-
-    // Calculate balances
-    const openingBalance = openingCredits - openingDebits;
-    const closingBalance = closingCredits - closingDebits;
-    const periodNet = periodCredits - periodDebits;
-
-    // Verification: Opening + Period Net should equal Closing
-    const calculatedClosing = openingBalance + periodNet;
-    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01;
-
-    console.log("✅ Balance calculation:", {
-      openingBalance: openingBalance.toFixed(2),
-      periodNet: periodNet.toFixed(2),
-      calculatedClosing: calculatedClosing.toFixed(2),
-      actualClosingBalance: closingBalance.toFixed(2),
-      matches: balanceMatches ? "✓" : "✗"
-    });
-
-    if (!balanceMatches) {
-      console.warn("⚠️ Balance verification FAILED", {
-        expected: calculatedClosing.toFixed(2),
-        actual: closingBalance.toFixed(2),
-        difference: (calculatedClosing - closingBalance).toFixed(2)
-      });
+    let closingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 23:59:59`
+    if (closingDate) {
+      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} 23:59:59`
     }
 
-    return {
+    console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
+
+    // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
+    // Money In: credit_amount (sales income, payments received)
+    // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
+    
+    // Opening balance: All transactions BEFORE opening date (< opening date at 00:00:00)
+    const openingTransactions = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date < ${openingDateStr}::timestamp
+    `
+
+    // Closing balance: All transactions UP TO AND INCLUDING closing date (≤ closing date at 23:59:59)
+    const closingTransactions = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date <= ${closingDateStr}::timestamp
+    `
+
+    // Period transactions: Transactions WITHIN the selected date range (opening to closing, inclusive)
+    const periodTransactions = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date >= ${openingDateStr}::timestamp
+        AND transaction_date <= ${closingDateStr}::timestamp
+    `
+
+    // Calculate opening balance (before the period starts)
+    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
+    const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
+    const openingBalance = openingCredits - openingDebits
+
+    // Calculate closing balance (at the end of the period)
+    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
+    const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
+    const closingBalance = closingCredits - closingDebits
+
+    // Calculate period changes (transactions during the selected period)
+    const periodCredits = Number(periodTransactions[0]?.total_credits) || 0
+    const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
+    const periodNet = periodCredits - periodDebits
+
+    // Verification: opening + period net should equal closing
+    const calculatedClosing = openingBalance + periodNet
+    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
+
+    console.log("Balance calculation results:", {
+      dateRange: `${openingDateStr} to ${closingDateStr}`,
+      openingCredits,
+      openingDebits,
       openingBalance,
-      closingBalance,
       periodCredits,
       periodDebits,
       periodNet,
-      openingCredits,
-      openingDebits,
       closingCredits,
-      closingDebits
-    };
+      closingDebits,
+      closingBalance,
+      verification: {
+        calculated: calculatedClosing,
+        actual: closingBalance,
+        matches: balanceMatches ? '✅ CORRECT' : '❌ ERROR'
+      }
+    })
 
+    // Log warning if balances don't match
+    if (!balanceMatches) {
+      console.warn("⚠️ Balance verification failed!", {
+        expected: calculatedClosing,
+        actual: closingBalance,
+        difference: closingBalance - calculatedClosing
+      })
+    }
+
+    return {
+      openingBalance,      // Balance before the period starts
+      closingBalance,      // Balance at the end of the period
+      periodCredits,       // Money in during the period
+      periodDebits,        // Money out during the period
+      periodNet,           // Net change during the period (credits - debits)
+      openingCredits,      // Total credits before period
+      openingDebits,       // Total debits before period
+      closingCredits,      // Total credits up to end of period
+      closingDebits,       // Total debits up to end of period
+    }
   } catch (error) {
-    console.error("❌ Error getting balances:", error);
+    console.error("Error getting accounting balances:", error)
     return {
       openingBalance: 0,
       closingBalance: 0,
@@ -1190,21 +1192,7 @@ export async function getAccountingBalances(
       openingCredits: 0,
       openingDebits: 0,
       closingCredits: 0,
-      closingDebits: 0
-    };
+      closingDebits: 0,
+    }
   }
-}
-
-// Helper function to format dates for SQL (preserves local time)
-function formatDateForSQL(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  const seconds = String(date.getSeconds()).padStart(2, '0');
-  
-  // Returns format: "YYYY-MM-DD HH:MM:SS"
-  // This is treated as local time by PostgreSQL
-  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
 }

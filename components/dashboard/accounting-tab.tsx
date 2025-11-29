@@ -246,51 +246,30 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Handle date changes and update Redux
   const handleDateFromChange = (date: Date | undefined) => {
-  if (!date) return
+    if (!date) return
 
-  const newFrom = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    0, 0, 0, 0
-  )
-
-  const newTo = dateTo // use last stable state
-
-  setDateFrom(newFrom)
-
-  dispatch(
-    setDateRange({
-      dateFrom: newFrom.toISOString(),
-      dateTo: newTo.toISOString(),
-    }),
-  )
-}
-
-
+    const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
+    setDateFrom(newDate)
+    dispatch(
+      setDateRange({
+        dateFrom: newDate.toISOString(),
+        dateTo: dateTo.toISOString(),
+      }),
+    )
+  }
 
   const handleDateToChange = (date: Date | undefined) => {
-  if (!date) return
+    if (!date) return
 
-  const newTo = new Date(
-    date.getFullYear(),
-    date.getMonth(),
-    date.getDate(),
-    23, 59, 59, 999
-  )
-
-  const newFrom = dateFrom // use last stable state
-
-  setDateTo(newTo)
-
-  dispatch(
-    setDateRange({
-      dateFrom: newFrom.toISOString(),
-      dateTo: newTo.toISOString(),
-    }),
-  )
-}
-
+    const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
+    setDateTo(newDate)
+    dispatch(
+      setDateRange({
+        dateFrom: dateFrom.toISOString(),
+        dateTo: newDate.toISOString(),
+      }),
+    )
+  }
 
   // Handle date range modal
   const openDateModal = () => {
