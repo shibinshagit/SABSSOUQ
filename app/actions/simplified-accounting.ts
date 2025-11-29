@@ -1062,137 +1062,99 @@ function getAccountType(transactionType: string): string {
       return "Other"
   }
 }
-// FIXED: Corrected opening and closing balance calculation
-// FIXED: Timezone-aware balance calculation for AED currency
-export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
+
+
+export async function getAccountingBalances(
+  deviceId: number,
+  openingDate: Date,
+  closingDate?: Date
+) {
   try {
-    console.log(
-      "Getting accounting balances for device:",
-      deviceId,
-      "opening date:",
-      openingDate.toISOString(),
-      "closing date:",
-      closingDate?.toISOString(),
-    )
+    console.log("Raw client dates:", { openingDate, closingDate });
 
-    // Ensure table exists
-    await createFinancialTransactionsTable()
+    await createFinancialTransactionsTable();
 
-    // FIXED: Use the EXACT input dates without conversion
-    // The dates coming in are already correct, we just need to format them properly
-    const formatDateExact = (date: Date) => {
-      return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
-    }
+    // --- FIX: Convert to real UTC boundaries ---
+    const openingUTCStart = new Date(Date.UTC(
+      openingDate.getFullYear(),
+      openingDate.getMonth(),
+      openingDate.getDate(),
+      0, 0, 0
+    ));
 
-    // Use the exact input dates (they already include the correct time boundaries)
-    const openingDateStr = formatDateExact(openingDate);
-    
-    let closingDateStr = formatDateExact(closingDate || openingDate);
-    if (closingDate) {
-      closingDateStr = formatDateExact(closingDate);
-    }
+    const closingUTCEnd = new Date(Date.UTC(
+      (closingDate || openingDate).getFullYear(),
+      (closingDate || openingDate).getMonth(),
+      (closingDate || openingDate).getDate(),
+      23, 59, 59
+    ));
 
-    console.log("EXACT Date strings:", { 
-      openingDateStr, 
-      closingDateStr,
-      inputOpening: openingDate.toISOString(),
-      inputClosing: closingDate?.toISOString()
-    })
+    // Format for SQL (Postgres-compatible)
+    const openingDateStr = openingUTCStart.toISOString().replace("T", " ").replace("Z", "");
+    const closingDateStr = closingUTCEnd.toISOString().replace("T", " ").replace("Z", "");
 
-    // FIXED: Alternative approach - use the dates as-is from frontend
-    // The frontend is already sending correct UTC dates with time boundaries
-    const openingBalanceData = await sql`
+    console.log("UTC date strings:", { openingDateStr, closingDateStr });
+
+    // --- SQL QUERIES (no timezone interference now) ---
+    const openingTransactions = await sql`
       SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
+        COALESCE(SUM(credit_amount), 0) AS total_credits,
+        COALESCE(SUM(debit_amount), 0) AS total_debits
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
         AND transaction_date < ${openingDateStr}::timestamp
-    `
+    `;
 
-    const closingBalanceData = await sql`
+    const closingTransactions = await sql`
       SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
+        COALESCE(SUM(credit_amount), 0) AS total_credits,
+        COALESCE(SUM(debit_amount), 0) AS total_debits
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
         AND transaction_date <= ${closingDateStr}::timestamp
-    `
+    `;
 
     const periodTransactions = await sql`
       SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
+        COALESCE(SUM(credit_amount), 0) AS total_credits,
+        COALESCE(SUM(debit_amount), 0) AS total_debits
+      FROM financial_transactions
+      WHERE device_id = ${deviceId}
         AND transaction_date >= ${openingDateStr}::timestamp
         AND transaction_date <= ${closingDateStr}::timestamp
-    `
+    `;
 
-    // Calculate balances
-    const openingCredits = Number(openingBalanceData[0]?.total_credits) || 0
-    const openingDebits = Number(openingBalanceData[0]?.total_debits) || 0
-    const openingBalance = openingCredits - openingDebits
+    // Numbers
+    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0;
+    const openingDebits  = Number(openingTransactions[0]?.total_debits)  || 0;
+    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0;
+    const closingDebits  = Number(closingTransactions[0]?.total_debits)  || 0;
+    const periodCredits  = Number(periodTransactions[0]?.total_credits)  || 0;
+    const periodDebits   = Number(periodTransactions[0]?.total_debits)   || 0;
 
-    const closingCredits = Number(closingBalanceData[0]?.total_credits) || 0
-    const closingDebits = Number(closingBalanceData[0]?.total_debits) || 0
-    const closingBalance = closingCredits - closingDebits
+    // Calculations
+    const openingBalance = openingCredits - openingDebits;
+    const closingBalance = closingCredits - closingDebits;
+    const periodNet = periodCredits - periodDebits;
 
-    const periodCredits = Number(periodTransactions[0]?.total_credits) || 0
-    const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
-    const periodNet = periodCredits - periodDebits
+    // Verify
+    const calculatedClosing = openingBalance + periodNet;
+    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01;
 
-    // Debug what transactions are actually being counted
-    const transactionAnalysis = await sql`
-      SELECT 
-        DATE(transaction_date) as trans_date,
-        COUNT(*) as count,
-        COALESCE(SUM(credit_amount), 0) as credits,
-        COALESCE(SUM(debit_amount), 0) as debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId}
-        AND transaction_date >= '2025-11-15'::timestamp
-        AND transaction_date <= '2025-11-17'::timestamp
-      GROUP BY DATE(transaction_date)
-      ORDER BY trans_date
-    `
+    console.log("Verification:", {
+      openingBalance,
+      periodNet,
+      calculatedClosing,
+      actualClosingBalance: closingBalance,
+      matches: balanceMatches
+    });
 
-    console.log("Transaction analysis by date:", transactionAnalysis)
-
-    // FIXED: Check what the actual opening balance should be for Nov 16
-    const actualNov16Opening = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date < '2025-11-16 00:00:00'::timestamp
-    `
-
-    const actualNov16Closing = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date <= '2025-11-16 23:59:59'::timestamp
-    `
-
-    console.log("Actual Nov 16 balances:", {
-      opening: Number(actualNov16Opening[0]?.total_credits) - Number(actualNov16Opening[0]?.total_debits),
-      closing: Number(actualNov16Closing[0]?.total_credits) - Number(actualNov16Closing[0]?.total_debits)
-    })
-
-    // Verification
-    const calculatedClosing = openingBalance + periodNet
-    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
-
-    console.log("Final balance calculation:", {
-      openingBalance: `AED ${openingBalance}`,
-      closingBalance: `AED ${closingBalance}`,
-      periodNet: `AED ${periodNet}`,
-      balanceMatches: balanceMatches ? '✅ CORRECT' : '❌ ERROR'
-    })
+    if (!balanceMatches) {
+      console.warn("Balance verification failed", {
+        expected: calculatedClosing,
+        actual: closingBalance
+      });
+    }
 
     return {
       openingBalance,
@@ -1203,11 +1165,11 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingCredits,
       openingDebits,
       closingCredits,
-      closingDebits,
-      currency: 'AED'
-    }
+      closingDebits
+    };
+
   } catch (error) {
-    console.error("Error getting accounting balances:", error)
+    console.error("Error getting balances:", error);
     return {
       openingBalance: 0,
       closingBalance: 0,
@@ -1217,9 +1179,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       openingCredits: 0,
       openingDebits: 0,
       closingCredits: 0,
-      closingDebits: 0,
-      currency: 'AED'
-    }
+      closingDebits: 0
+    };
   }
 }
-

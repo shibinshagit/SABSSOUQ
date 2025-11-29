@@ -246,30 +246,51 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
 
   // Handle date changes and update Redux
   const handleDateFromChange = (date: Date | undefined) => {
-    if (!date) return
+  if (!date) return
 
-    const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0)
-    setDateFrom(newDate)
-    dispatch(
-      setDateRange({
-        dateFrom: newDate.toISOString(),
-        dateTo: dateTo.toISOString(),
-      }),
-    )
-  }
+  const newFrom = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    0, 0, 0, 0
+  )
+
+  const newTo = dateTo // use last stable state
+
+  setDateFrom(newFrom)
+
+  dispatch(
+    setDateRange({
+      dateFrom: newFrom.toISOString(),
+      dateTo: newTo.toISOString(),
+    }),
+  )
+}
+
+
 
   const handleDateToChange = (date: Date | undefined) => {
-    if (!date) return
+  if (!date) return
 
-    const newDate = new Date(date.getFullYear(), date.getMonth(), date.getDate(), 23, 59, 59, 999)
-    setDateTo(newDate)
-    dispatch(
-      setDateRange({
-        dateFrom: dateFrom.toISOString(),
-        dateTo: newDate.toISOString(),
-      }),
-    )
-  }
+  const newTo = new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    23, 59, 59, 999
+  )
+
+  const newFrom = dateFrom // use last stable state
+
+  setDateTo(newTo)
+
+  dispatch(
+    setDateRange({
+      dateFrom: newFrom.toISOString(),
+      dateTo: newTo.toISOString(),
+    }),
+  )
+}
+
 
   // Handle date range modal
   const openDateModal = () => {
@@ -1733,12 +1754,27 @@ const setToday = () => {
 
 const setLastWeek = () => {
   const today = new Date()
-  const lastWeekStart = startOfWeek(subWeeks(today, 1), { weekStartsOn: 1 })
-  const todayEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999)
+
+  // Today end
+  const todayEnd = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate(),
+    23, 59, 59, 999
+  )
+
+  // Last 7 days (including today)
+  const lastWeekStart = new Date(
+    today.getFullYear(),
+    today.getMonth(),
+    today.getDate() - 6,
+    0, 0, 0, 0
+  )
 
   handleDateFromChange(lastWeekStart)
   handleDateToChange(todayEnd)
 }
+
 
 // NEW: Enhanced description generator
 const getEnhancedDescription = (transaction: any) => {
