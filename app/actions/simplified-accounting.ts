@@ -1078,35 +1078,29 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // FIXED: Use SIMPLE date formatting without timezone conversion
-    // Let the database handle the date comparisons as-is
-    const formatDateSimple = (date: Date, time: string) => {
-      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${time}`
+    // FIXED: Use the EXACT input dates without conversion
+    // The dates coming in are already correct, we just need to format them properly
+    const formatDateExact = (date: Date) => {
+      return date.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, '');
     }
 
-    // Use simple date formatting (same as your local environment)
-    const openingDateStr = formatDateSimple(openingDate, "00:00:00")
+    // Use the exact input dates (they already include the correct time boundaries)
+    const openingDateStr = formatDateExact(openingDate);
     
-    let closingDateStr = formatDateSimple(openingDate, "23:59:59")
+    let closingDateStr = formatDateExact(closingDate || openingDate);
     if (closingDate) {
-      closingDateStr = formatDateSimple(closingDate, "23:59:59")
+      closingDateStr = formatDateExact(closingDate);
     }
 
-    console.log("Simple Date strings:", { 
+    console.log("EXACT Date strings:", { 
       openingDateStr, 
-      closingDateStr
+      closingDateStr,
+      inputOpening: openingDate.toISOString(),
+      inputClosing: closingDate?.toISOString()
     })
 
-    // FIXED: Use the CORRECT column name (probably 'id' instead of 'transaction_id')
-    // Let's first check what columns exist in the table
-    const tableInfo = await sql`
-      SELECT column_name 
-      FROM information_schema.columns 
-      WHERE table_name = 'financial_transactions'
-    `
-    console.log("Available columns in financial_transactions:", tableInfo.map(t => t.column_name))
-
-    // METHOD: Use the working approach - calculate based on date ranges
+    // FIXED: Alternative approach - use the dates as-is from frontend
+    // The frontend is already sending correct UTC dates with time boundaries
     const openingBalanceData = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
@@ -1148,26 +1142,34 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
     const periodNet = periodCredits - periodDebits
 
-    // FIXED: Better debugging with correct column names
-    // Let's use what we know works - check individual sums
-    const debugSums = await sql`
+    // Debug what transactions are actually being counted
+    const transactionAnalysis = await sql`
       SELECT 
-        COUNT(*) as total_count,
-        COUNT(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN 1 END) as before_opening_count,
-        COUNT(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN 1 END) as during_period_count,
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN credit_amount ELSE 0 END), 0) as opening_credits,
-        COALESCE(SUM(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN debit_amount ELSE 0 END), 0) as opening_debits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN credit_amount ELSE 0 END), 0) as period_credits,
-        COALESCE(SUM(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN debit_amount ELSE 0 END), 0) as period_debits
+        DATE(transaction_date) as trans_date,
+        COUNT(*) as count,
+        COALESCE(SUM(credit_amount), 0) as credits,
+        COALESCE(SUM(debit_amount), 0) as debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId}
+        AND transaction_date >= '2025-11-15'::timestamp
+        AND transaction_date <= '2025-11-17'::timestamp
+      GROUP BY DATE(transaction_date)
+      ORDER BY trans_date
     `
 
-    console.log("Debug sums:", debugSums[0])
+    console.log("Transaction analysis by date:", transactionAnalysis)
 
-    // FIXED: The core issue - we need to ensure Nov 16 closing = Nov 17 opening
-    // Let's manually verify by checking what the actual closing balance was on Nov 16
-    const nov16ClosingCheck = await sql`
+    // FIXED: Check what the actual opening balance should be for Nov 16
+    const actualNov16Opening = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date < '2025-11-16 00:00:00'::timestamp
+    `
+
+    const actualNov16Closing = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
         COALESCE(SUM(debit_amount), 0) as total_debits
@@ -1176,20 +1178,9 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date <= '2025-11-16 23:59:59'::timestamp
     `
 
-    const nov17OpeningCheck = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date < '2025-11-17 00:00:00'::timestamp
-    `
-
-    console.log("Balance continuity check:", {
-      nov16Closing: Number(nov16ClosingCheck[0]?.total_credits) - Number(nov16ClosingCheck[0]?.total_debits),
-      nov17Opening: Number(nov17OpeningCheck[0]?.total_credits) - Number(nov17OpeningCheck[0]?.total_debits),
-      shouldBeEqual: Number(nov16ClosingCheck[0]?.total_credits) - Number(nov16ClosingCheck[0]?.total_debits) === 
-                    Number(nov17OpeningCheck[0]?.total_credits) - Number(nov17OpeningCheck[0]?.total_debits)
+    console.log("Actual Nov 16 balances:", {
+      opening: Number(actualNov16Opening[0]?.total_credits) - Number(actualNov16Opening[0]?.total_debits),
+      closing: Number(actualNov16Closing[0]?.total_credits) - Number(actualNov16Closing[0]?.total_debits)
     })
 
     // Verification
