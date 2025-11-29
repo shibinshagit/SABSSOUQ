@@ -1062,9 +1062,7 @@ function getAccountType(transactionType: string): string {
       return "Other"
   }
 }
-
-// FIXED: Get opening and closing balances based on actual transaction data with date range
-// FIXED: Get opening and closing balances based on actual transaction data with date range
+// FIXED: Corrected opening and closing balance calculation
 export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
   try {
     console.log(
@@ -1089,22 +1087,24 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
 
     console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
 
-    // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
-    // Money In: credit_amount (sales income, payments received)
-    // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
-    
-    // Opening balance: All transactions BEFORE opening date (< opening date at 00:00:00)
-    const openingTransactions = await sql`
+    // FIXED: Calculate opening balance as the closing balance of the previous day
+    // Get the closing balance at the end of the day BEFORE the opening date
+    const previousDay = new Date(openingDate)
+    previousDay.setDate(previousDay.getDate() - 1)
+    const previousDayStr = `${previousDay.getFullYear()}-${String(previousDay.getMonth() + 1).padStart(2, "0")}-${String(previousDay.getDate()).padStart(2, "0")} 23:59:59`
+
+    // Opening balance = Closing balance of previous day
+    const openingBalanceData = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date < ${openingDateStr}::timestamp
+        AND transaction_date <= ${previousDayStr}::timestamp
     `
 
-    // Closing balance: All transactions UP TO AND INCLUDING closing date (≤ closing date at 23:59:59)
-    const closingTransactions = await sql`
+    // Closing balance: All transactions UP TO AND INCLUDING closing date
+    const closingBalanceData = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
         COALESCE(SUM(debit_amount), 0) as total_debits
@@ -1113,7 +1113,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date <= ${closingDateStr}::timestamp
     `
 
-    // Period transactions: Transactions WITHIN the selected date range (opening to closing, inclusive)
+    // Period transactions: Transactions WITHIN the selected date range
     const periodTransactions = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
@@ -1124,17 +1124,15 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date <= ${closingDateStr}::timestamp
     `
 
-    // Calculate opening balance (before the period starts)
-    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
-    const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
+    // Calculate balances
+    const openingCredits = Number(openingBalanceData[0]?.total_credits) || 0
+    const openingDebits = Number(openingBalanceData[0]?.total_debits) || 0
     const openingBalance = openingCredits - openingDebits
 
-    // Calculate closing balance (at the end of the period)
-    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
-    const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
+    const closingCredits = Number(closingBalanceData[0]?.total_credits) || 0
+    const closingDebits = Number(closingBalanceData[0]?.total_debits) || 0
     const closingBalance = closingCredits - closingDebits
 
-    // Calculate period changes (transactions during the selected period)
     const periodCredits = Number(periodTransactions[0]?.total_credits) || 0
     const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
     const periodNet = periodCredits - periodDebits
@@ -1145,14 +1143,11 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
 
     console.log("Balance calculation results:", {
       dateRange: `${openingDateStr} to ${closingDateStr}`,
-      openingCredits,
-      openingDebits,
+      previousDay: previousDayStr,
       openingBalance,
       periodCredits,
       periodDebits,
       periodNet,
-      closingCredits,
-      closingDebits,
       closingBalance,
       verification: {
         calculated: calculatedClosing,
@@ -1161,7 +1156,6 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       }
     })
 
-    // Log warning if balances don't match
     if (!balanceMatches) {
       console.warn("⚠️ Balance verification failed!", {
         expected: calculatedClosing,
@@ -1171,13 +1165,13 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     }
 
     return {
-      openingBalance,      // Balance before the period starts
-      closingBalance,      // Balance at the end of the period
+      openingBalance,      // Balance at start of the period (closing balance of previous day)
+      closingBalance,      // Balance at end of the period
       periodCredits,       // Money in during the period
       periodDebits,        // Money out during the period
-      periodNet,           // Net change during the period (credits - debits)
-      openingCredits,      // Total credits before period
-      openingDebits,       // Total debits before period
+      periodNet,           // Net change during the period
+      openingCredits,      // Total credits up to start of period
+      openingDebits,       // Total debits up to start of period
       closingCredits,      // Total credits up to end of period
       closingDebits,       // Total debits up to end of period
     }
