@@ -1078,52 +1078,35 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // FIXED: Correct timezone conversion for UAE (UTC+4)
-    const formatDateUAETimezone = (date: Date, time: string) => {
-      // Create a new date object to avoid modifying the original
-      const dateCopy = new Date(date);
-      
-      // Get the date components in LOCAL time (since your server might be in different timezone)
-      // But we want to represent it as UAE time
-      const year = dateCopy.getFullYear();
-      const month = dateCopy.getMonth();
-      const day = dateCopy.getDate();
-      
-      // Create a new date that represents the same calendar date in UAE time
-      // This ensures we're using the correct date boundaries regardless of server timezone
-      const uaeDate = new Date(Date.UTC(year, month, day));
-      
-      // For UAE time (UTC+4), we need to adjust the UTC time
-      const [hours, minutes, seconds] = time.split(':').map(Number);
-      uaeDate.setUTCHours(hours - 4, minutes, seconds, 0); // Subtract 4 hours to compensate for UTC+4
-      
-      return uaeDate.toISOString().replace('T', ' ').replace('.000Z', '');
+    // FIXED: Use SIMPLE date formatting without timezone conversion
+    // Let the database handle the date comparisons as-is
+    const formatDateSimple = (date: Date, time: string) => {
+      return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")} ${time}`
     }
 
-    // Use UAE timezone for all date calculations
-    const openingDateStr = formatDateUAETimezone(openingDate, "00:00:00")
+    // Use simple date formatting (same as your local environment)
+    const openingDateStr = formatDateSimple(openingDate, "00:00:00")
     
-    let closingDateStr = formatDateUAETimezone(openingDate, "23:59:59")
+    let closingDateStr = formatDateSimple(openingDate, "23:59:59")
     if (closingDate) {
-      closingDateStr = formatDateUAETimezone(closingDate, "23:59:59")
+      closingDateStr = formatDateSimple(closingDate, "23:59:59")
     }
 
-    // Calculate previous day
-    const previousDay = new Date(openingDate)
-    previousDay.setDate(previousDay.getDate() - 1)
-    const previousDayStr = formatDateUAETimezone(previousDay, "23:59:59")
-
-    console.log("UAE Timezone Date strings:", { 
+    console.log("Simple Date strings:", { 
       openingDateStr, 
-      closingDateStr,
-      previousDayStr
+      closingDateStr
     })
 
-    // FIXED: Let's also check what timezone the database is using
-    const dbTimeZone = await sql`SHOW timezone;`
-    console.log("Database timezone:", dbTimeZone[0]?.timezone)
+    // FIXED: Use the CORRECT column name (probably 'id' instead of 'transaction_id')
+    // Let's first check what columns exist in the table
+    const tableInfo = await sql`
+      SELECT column_name 
+      FROM information_schema.columns 
+      WHERE table_name = 'financial_transactions'
+    `
+    console.log("Available columns in financial_transactions:", tableInfo.map(t => t.column_name))
 
-    // METHOD 1: Let's try a different approach - use the original logic but with proper debugging
+    // METHOD: Use the working approach - calculate based on date ranges
     const openingBalanceData = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
@@ -1152,7 +1135,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         AND transaction_date <= ${closingDateStr}::timestamp
     `
 
-    // Calculate balances in AED
+    // Calculate balances
     const openingCredits = Number(openingBalanceData[0]?.total_credits) || 0
     const openingDebits = Number(openingBalanceData[0]?.total_debits) || 0
     const openingBalance = openingCredits - openingDebits
@@ -1165,90 +1148,72 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
     const periodNet = periodCredits - periodDebits
 
-    // FIXED: Better debugging - let's see actual transaction dates and amounts
-    const debugTransactions = await sql`
+    // FIXED: Better debugging with correct column names
+    // Let's use what we know works - check individual sums
+    const debugSums = await sql`
       SELECT 
-        transaction_id,
-        transaction_date,
-        credit_amount,
-        debit_amount,
-        description,
-        CASE 
-          WHEN transaction_date < ${openingDateStr}::timestamp THEN 'before_opening'
-          WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN 'during_period'
-          ELSE 'after_closing'
-        END as period_category
+        COUNT(*) as total_count,
+        COUNT(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN 1 END) as before_opening_count,
+        COUNT(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN 1 END) as during_period_count,
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN credit_amount ELSE 0 END), 0) as opening_credits,
+        COALESCE(SUM(CASE WHEN transaction_date < ${openingDateStr}::timestamp THEN debit_amount ELSE 0 END), 0) as opening_debits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN credit_amount ELSE 0 END), 0) as period_credits,
+        COALESCE(SUM(CASE WHEN transaction_date >= ${openingDateStr}::timestamp AND transaction_date <= ${closingDateStr}::timestamp THEN debit_amount ELSE 0 END), 0) as period_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId}
-        AND (transaction_date < ${openingDateStr}::timestamp 
-             OR transaction_date <= ${closingDateStr}::timestamp)
-      ORDER BY transaction_date
     `
 
-    console.log("Detailed transaction analysis:", {
-      openingDate: openingDateStr,
-      closingDate: closingDateStr,
-      transactions: debugTransactions.map(t => ({
-        id: t.transaction_id,
-        date: t.transaction_date,
-        credit: t.credit_amount,
-        debit: t.debit_amount,
-        desc: t.description,
-        category: t.period_category
-      }))
+    console.log("Debug sums:", debugSums[0])
+
+    // FIXED: The core issue - we need to ensure Nov 16 closing = Nov 17 opening
+    // Let's manually verify by checking what the actual closing balance was on Nov 16
+    const nov16ClosingCheck = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date <= '2025-11-16 23:59:59'::timestamp
+    `
+
+    const nov17OpeningCheck = await sql`
+      SELECT 
+        COALESCE(SUM(credit_amount), 0) as total_credits,
+        COALESCE(SUM(debit_amount), 0) as total_debits
+      FROM financial_transactions 
+      WHERE device_id = ${deviceId} 
+        AND transaction_date < '2025-11-17 00:00:00'::timestamp
+    `
+
+    console.log("Balance continuity check:", {
+      nov16Closing: Number(nov16ClosingCheck[0]?.total_credits) - Number(nov16ClosingCheck[0]?.total_debits),
+      nov17Opening: Number(nov17OpeningCheck[0]?.total_credits) - Number(nov17OpeningCheck[0]?.total_debits),
+      shouldBeEqual: Number(nov16ClosingCheck[0]?.total_credits) - Number(nov16ClosingCheck[0]?.total_debits) === 
+                    Number(nov17OpeningCheck[0]?.total_credits) - Number(nov17OpeningCheck[0]?.total_debits)
     })
 
-    // Calculate what the balances should be based on individual transactions
-    let calculatedOpening = 0;
-    let calculatedClosing = 0;
-    let calculatedPeriodNet = 0;
-
-    debugTransactions.forEach(t => {
-      const net = (t.credit_amount || 0) - (t.debit_amount || 0);
-      if (t.period_category === 'before_opening') {
-        calculatedOpening += net;
-      }
-      if (t.period_category === 'during_period') {
-        calculatedPeriodNet += net;
-      }
-      if (t.period_category === 'before_opening' || t.period_category === 'during_period') {
-        calculatedClosing += net;
-      }
-    });
-
-    console.log("Manual calculation from transactions:", {
-      calculatedOpening,
-      calculatedPeriodNet, 
-      calculatedClosing,
-      sqlOpening: openingBalance,
-      sqlClosing: closingBalance,
-      sqlPeriodNet: periodNet
-    });
-
     // Verification
-    const sqlCalculatedClosing = openingBalance + periodNet
-    const balanceMatches = Math.abs(sqlCalculatedClosing - closingBalance) < 0.01
+    const calculatedClosing = openingBalance + periodNet
+    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
 
-    console.log("Balance calculation results (AED):", {
+    console.log("Final balance calculation:", {
       openingBalance: `AED ${openingBalance}`,
       closingBalance: `AED ${closingBalance}`,
       periodNet: `AED ${periodNet}`,
-      calculatedClosing: `AED ${sqlCalculatedClosing}`,
-      balanceMatches: balanceMatches ? '✅ CORRECT' : '❌ ERROR',
-      difference: closingBalance - sqlCalculatedClosing
+      balanceMatches: balanceMatches ? '✅ CORRECT' : '❌ ERROR'
     })
 
     return {
-      openingBalance,      // AED
-      closingBalance,      // AED  
-      periodCredits,       // AED
-      periodDebits,        // AED
-      periodNet,           // AED
-      openingCredits,      // AED
-      openingDebits,       // AED
-      closingCredits,      // AED
-      closingDebits,       // AED
-      currency: 'AED'      // Always AED
+      openingBalance,
+      closingBalance,
+      periodCredits,
+      periodDebits,
+      periodNet,
+      openingCredits,
+      openingDebits,
+      closingCredits,
+      closingDebits,
+      currency: 'AED'
     }
   } catch (error) {
     console.error("Error getting accounting balances:", error)
