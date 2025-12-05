@@ -444,6 +444,7 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
   }
 
   // Updated formatDateTime function
+  // Updated formatDateTime function - Always display in UTC
   const formatDateTime = (dateInput: string | Date) => {
     let date: Date
 
@@ -452,20 +453,22 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
     } else if (typeof dateInput === "string") {
       date = parseISO(dateInput)
     } else {
-      return { date: "Invalid Date", time: "00:00" }
+      return { date: "Invalid Date", time: "00:00 UTC" }
     }
 
     if (!isValid(date)) {
-      return { date: "Invalid Date", time: "00:00" }
+      return { date: "Invalid Date", time: "00:00 UTC" }
     }
 
+    // Format in UTC timezone
     return {
-      date: format(date, "MMM d, yyyy"),
-      time: format(date, "HH:mm"),
+      date: format(date, "MMM d, yyyy") + " UTC",
+      time: format(date, "HH:mm") + " UTC",
     }
   }
 
-  // Updated formatDate function
+
+// Updated formatDate function - Always display in UTC
   const formatDateOnly = (dateInput: string | Date) => {
     let date: Date
 
@@ -481,8 +484,10 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
       return "Invalid Date"
     }
 
-    return format(date, "MMM d, yyyy")
+    return format(date, "MMM d, yyyy") + " UTC"
   }
+
+  
 
   const getStatusBadge = (status: string) => {
     const statusLower = status.toLowerCase()
