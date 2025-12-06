@@ -2,31 +2,6 @@
 
 import { sql } from "@/lib/db"
 
-// Helper function to convert Date to UTC ISO string
-function toUTCISOString(date: Date): string {
-  return new Date(Date.UTC(
-    date.getUTCFullYear(),
-    date.getUTCMonth(),
-    date.getUTCDate(),
-    date.getUTCHours(),
-    date.getUTCMinutes(),
-    date.getUTCSeconds(),
-    date.getUTCMilliseconds()
-  )).toISOString()
-}
-
-// Helper function to format date for SQL queries in UTC
-function formatUTCDateForSQL(date: Date, endOfDay: boolean = false): string {
-  const year = date.getUTCFullYear()
-  const month = String(date.getUTCMonth() + 1).padStart(2, "0")
-  const day = String(date.getUTCDate()).padStart(2, "0")
-  
-  if (endOfDay) {
-    return `${year}-${month}-${day} 23:59:59+00`
-  }
-  return `${year}-${month}-${day} 00:00:00+00`
-}
-
 // Create a simplified financial transactions table from scratch
 async function createFinancialTransactionsTable() {
   try {
@@ -41,11 +16,11 @@ async function createFinancialTransactionsTable() {
     if (!tableExists[0]?.exists) {
       console.log("Creating financial_transactions table from scratch")
 
-      // Create the table with TIMESTAMPTZ for proper UTC handling
+      // Create the table with all required columns for detailed accounting
       await sql`
         CREATE TABLE financial_transactions (
           id SERIAL PRIMARY KEY,
-          transaction_date TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+          transaction_date TIMESTAMP NOT NULL DEFAULT NOW(),
           transaction_type VARCHAR(50) NOT NULL,
           reference_type VARCHAR(50) NOT NULL,
           reference_id INTEGER NOT NULL,
@@ -61,8 +36,8 @@ async function createFinancialTransactionsTable() {
           device_id INTEGER NOT NULL,
           company_id INTEGER DEFAULT 1,
           created_by INTEGER NOT NULL,
-          created_at TIMESTAMPTZ DEFAULT NOW(),
-          updated_at TIMESTAMPTZ DEFAULT NOW()
+          created_at TIMESTAMP DEFAULT NOW(),
+          updated_at TIMESTAMP DEFAULT NOW()
         )
       `
 
@@ -70,7 +45,7 @@ async function createFinancialTransactionsTable() {
       await sql`CREATE INDEX idx_financial_transactions_device ON financial_transactions(device_id, transaction_date)`
       await sql`CREATE INDEX idx_financial_transactions_ref ON financial_transactions(reference_type, reference_id)`
 
-      console.log("Financial transactions table created successfully with TIMESTAMPTZ")
+      console.log("Financial transactions table created successfully")
     } else {
       // Check if new columns exist and add them if needed
       try {
@@ -81,29 +56,14 @@ async function createFinancialTransactionsTable() {
         await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS status VARCHAR(50)`
         await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)`
         await sql`ALTER TABLE financial_transactions ADD COLUMN IF NOT EXISTS notes TEXT`
-        
-        // Update existing timestamp columns to TIMESTAMPTZ if needed
-        await sql`
-          ALTER TABLE financial_transactions 
-          ALTER COLUMN transaction_date TYPE TIMESTAMPTZ USING transaction_date AT TIME ZONE 'UTC'
-        `
-        await sql`
-          ALTER TABLE financial_transactions 
-          ALTER COLUMN created_at TYPE TIMESTAMPTZ USING created_at AT TIME ZONE 'UTC'
-        `
-        await sql`
-          ALTER TABLE financial_transactions 
-          ALTER COLUMN updated_at TYPE TIMESTAMPTZ USING updated_at AT TIME ZONE 'UTC'
-        `
-        
-        console.log("Updated financial_transactions table columns to TIMESTAMPTZ")
-      } catch (err: any) {
-        console.log("Columns might already exist or already TIMESTAMPTZ:", err.message)
+        console.log("Added missing columns to financial_transactions table")
+      } catch (err) {
+        console.log("Columns might already exist:", err.message)
       }
     }
 
     return true
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error creating financial_transactions table:", error)
     return false
   }
@@ -130,7 +90,6 @@ export async function recordSupplierPayment(paymentData: {
       deviceId: paymentData.deviceId,
       userId: paymentData.userId,
       notes: paymentData.notes,
-      paymentDate: paymentData.paymentDate.toISOString(),
     })
 
     // Ensure table exists
@@ -151,9 +110,6 @@ export async function recordSupplierPayment(paymentData: {
       description += ` - Notes: ${paymentData.notes.trim()}`
     }
 
-    // Convert to UTC
-    const utcPaymentDate = toUTCISOString(paymentData.paymentDate)
-
     // Insert the supplier payment transaction
     const result = await sql`
       INSERT INTO financial_transactions (
@@ -164,13 +120,13 @@ export async function recordSupplierPayment(paymentData: {
         'supplier_payment', 'supplier', ${paymentData.supplierId},
         ${paymentAmount}, ${paymentAmount}, 0, ${debitAmount}, ${creditAmount},
         'Completed', ${paymentData.paymentMethod}, ${description}, ${paymentData.notes || null}, 
-        ${paymentData.deviceId}, 1, ${paymentData.userId}, ${utcPaymentDate}::timestamptz
+        ${paymentData.deviceId}, 1, ${paymentData.userId}, ${paymentData.paymentDate.toISOString()}
       ) RETURNING id
     `
 
     console.log(`Supplier payment transaction recorded successfully: ID ${result[0]?.id}`)
     return { success: true, transactionId: result[0]?.id }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording supplier payment transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -199,7 +155,7 @@ export async function recordSaleTransaction(saleData: {
       status: saleData.status,
       deviceId: saleData.deviceId,
       userId: saleData.userId,
-      saleDate: saleData.saleDate.toISOString(),
+      saleDate: saleData.saleDate,
     })
 
     // Ensure table exists
@@ -261,9 +217,6 @@ export async function recordSaleTransaction(saleData: {
       description = `Sale #${saleData.saleId} - Completed - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"}`
     }
 
-    // Convert to UTC
-    const utcSaleDate = toUTCISOString(saleData.saleDate)
-
     // Record the transaction with all details
     const result = await sql`
       INSERT INTO financial_transactions (
@@ -274,7 +227,7 @@ export async function recordSaleTransaction(saleData: {
         'sale', 'sale', ${saleData.saleId},
         ${saleData.totalAmount}, ${receivedAmountForRecord}, ${costAmount}, ${debitAmount}, ${creditAmount},
         ${saleData.status}, ${saleData.paymentMethod || "Cash"}, ${description}, 
-        ${saleData.deviceId}, 1, ${saleData.userId}, ${utcSaleDate}::timestamptz
+        ${saleData.deviceId}, 1, ${saleData.userId}, ${saleData.saleDate}
       ) RETURNING id
     `
 
@@ -286,7 +239,7 @@ export async function recordSaleTransaction(saleData: {
       costAmount
     })
     return { success: true, transactionId: result[0]?.id }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording sale transaction:", error)
     console.error("Error details:", {
       message: error.message,
@@ -488,9 +441,8 @@ export async function recordSaleAdjustment(adjustmentData: {
       }
     }
 
-    // Ensure adjustmentDate is not null and convert to UTC
+    // Ensure adjustmentDate is not null
     const transactionDate = adjustmentData.adjustmentDate || new Date()
-    const utcTransactionDate = toUTCISOString(transactionDate)
 
     // Only create adjustment if there are actual financial changes
     if (debitAmount !== 0 || creditAmount !== 0 || costAmount !== 0) {
@@ -504,7 +456,7 @@ export async function recordSaleAdjustment(adjustmentData: {
           'adjustment', 'sale', ${adjustmentData.saleId},
           ${amountDiff}, ${receivedDiff}, ${costAmount}, ${debitAmount}, ${creditAmount},
           ${status}, ${description}, 
-          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${utcTransactionDate}::timestamptz
+          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
         ) RETURNING id
       `
 
@@ -513,7 +465,7 @@ export async function recordSaleAdjustment(adjustmentData: {
     } else {
       return { success: true, transactionId: null, message: "No financial changes to record" }
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording sale adjustment:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -560,9 +512,6 @@ export async function recordPurchaseTransaction(purchaseData: {
 
     const costAmount = 0 // Purchases don't have COGS
 
-    // Convert to UTC
-    const utcPurchaseDate = toUTCISOString(purchaseData.purchaseDate)
-
     console.log("Recording purchase transaction:", {
       purchaseId: purchaseData.purchaseId,
       status,
@@ -570,8 +519,7 @@ export async function recordPurchaseTransaction(purchaseData: {
       receivedAmount,
       debitAmount,
       creditAmount,
-      description,
-      purchaseDate: utcPurchaseDate
+      description
     })
 
     // Insert the main purchase transaction
@@ -584,7 +532,7 @@ export async function recordPurchaseTransaction(purchaseData: {
         'purchase', 'purchase', ${purchaseData.purchaseId},
         ${totalAmount}, ${receivedAmount}, ${costAmount}, ${debitAmount}, ${creditAmount},
         ${purchaseData.status}, ${purchaseData.paymentMethod}, ${description}, 
-        ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${utcPurchaseDate}::timestamptz
+        ${purchaseData.deviceId}, 1, ${purchaseData.userId}, ${purchaseData.purchaseDate}
       ) RETURNING id
     `
 
@@ -596,7 +544,7 @@ export async function recordPurchaseTransaction(purchaseData: {
       receivedAmount
     })
     return { success: true, transactionId: result[0]?.id }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording purchase transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -680,7 +628,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
           console.log(`Purchase edit: Amount decreased by ${Math.abs(amountDiff)}, recording credit`)
         }
       }
-
+      
       // Handle payment changes separately from amount changes
       if (receivedDiff > 0) {
         // Additional payment made
@@ -736,9 +684,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
       }
     }
 
-    // Convert to UTC
     const transactionDate = adjustmentData.adjustmentDate || new Date()
-    const utcTransactionDate = toUTCISOString(transactionDate)
 
     // Only create transaction if there are actual financial changes
     if (debitAmount !== 0 || creditAmount !== 0) {
@@ -751,7 +697,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
           'adjustment', 'purchase', ${adjustmentData.purchaseId},
           ${amountDiff}, ${receivedDiff}, 0, ${debitAmount}, ${creditAmount},
           ${status}, ${description}, 
-          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${utcTransactionDate}::timestamptz
+          ${adjustmentData.deviceId}, 1, ${adjustmentData.userId}, ${transactionDate}
         ) RETURNING id
       `
 
@@ -766,7 +712,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
     } else {
       return { success: true, transactionId: null, message: "No financial changes to record" }
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording purchase adjustment:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -793,9 +739,6 @@ export async function recordManualTransaction(transactionData: {
 
     const description = `Manual Entry - ${transactionData.category} - ${transactionData.description}`
 
-    // Convert to UTC
-    const utcTransactionDate = toUTCISOString(transactionData.transactionDate)
-
     // Insert the manual transaction
     const result = await sql`
       INSERT INTO financial_transactions (
@@ -806,13 +749,13 @@ export async function recordManualTransaction(transactionData: {
         'manual', 'manual', 0,
         ${amount}, ${amount}, 0, ${debitAmount}, ${creditAmount},
         'Manual Entry', ${transactionData.paymentMethod}, ${description}, 
-        ${transactionData.deviceId}, 1, ${transactionData.userId}, ${utcTransactionDate}::timestamptz
+        ${transactionData.deviceId}, 1, ${transactionData.userId}, ${transactionData.transactionDate}
       ) RETURNING id
     `
 
     console.log(`Manual transaction recorded: ID ${result[0]?.id}`)
     return { success: true, transactionId: result[0]?.id }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error recording manual transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -833,7 +776,7 @@ export async function deleteSaleTransaction(saleId: number, deviceId: number) {
 
     console.log(`Deleted ${result.length} financial transactions for sale ${saleId}`)
     return { success: true, deletedCount: result.length }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error deleting sale transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
@@ -854,13 +797,13 @@ export async function deletePurchaseTransaction(purchaseId: number, deviceId: nu
 
     console.log(`Deleted ${result.length} financial transactions for purchase ${purchaseId}`)
     return { success: true, deletedCount: result.length }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error deleting purchase transaction:", error)
     return { success: false, error: error instanceof Error ? error.message : "Unknown error" }
   }
 }
 
-// FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation with UTC
+// FIXED: Get financial summary from the simplified structure - PROPER cash balance calculation
 export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dateTo?: Date, cacheBuster?: number) {
   try {
     console.log("Getting financial summary for device:", deviceId, "date range:", dateFrom, "to", dateTo)
@@ -885,27 +828,26 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       }
     }
 
-    // Use UTC date formatting
+    // Fix timezone issues by using explicit date strings in SQL query
     let fromDateStr = null
     let toDateStr = null
 
     if (dateFrom) {
-      fromDateStr = formatUTCDateForSQL(dateFrom, false)
+      fromDateStr = `${dateFrom.getFullYear()}-${String(dateFrom.getMonth() + 1).padStart(2, "0")}-${String(dateFrom.getDate()).padStart(2, "0")} 00:00:00`
     }
 
     if (dateTo) {
-      toDateStr = formatUTCDateForSQL(dateTo, true)
+      toDateStr = `${dateTo.getFullYear()}-${String(dateTo.getMonth() + 1).padStart(2, "0")}-${String(dateTo.getDate()).padStart(2, "0")} 23:59:59`
     }
 
-    // Query transactions with UTC timezone
+    // Query transactions
     let transactions
     if (fromDateStr && toDateStr) {
-      console.log("Querying with UTC date range:", fromDateStr, "to", toDateStr)
+      console.log("Querying with date range:", fromDateStr, "to", toDateStr)
       transactions = await sql`
         SELECT * FROM financial_transactions 
         WHERE device_id = ${deviceId} 
-          AND transaction_date AT TIME ZONE 'UTC' >= ${fromDateStr}::timestamptz
-          AND transaction_date AT TIME ZONE 'UTC' <= ${toDateStr}::timestamptz
+          AND transaction_date::date BETWEEN ${fromDateStr}::date AND ${toDateStr}::date
         ORDER BY transaction_date DESC, id DESC
       `
     } else {
@@ -980,8 +922,8 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
       ORDER BY p.purchase_date DESC
     `
 
-    const accountsReceivable = receivablesQuery.reduce((sum: number, r: any) => sum + Number(r.outstanding_amount), 0)
-    const accountsPayable = payablesQuery.reduce((sum: number, p: any) => sum + Number(p.outstanding_amount), 0)
+    const accountsReceivable = receivablesQuery.reduce((sum, r) => sum + Number(r.outstanding_amount), 0)
+    const accountsPayable = payablesQuery.reduce((sum, p) => sum + Number(p.outstanding_amount), 0)
     const netProfit = totalIncome - totalExpenses
 
     console.log("Financial summary calculated:", {
@@ -1074,7 +1016,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
         status: p.status,
       })),
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error getting financial summary:", error)
     console.error("Error details:", {
       message: error.message,
@@ -1118,7 +1060,8 @@ function getAccountType(transactionType: string): string {
   }
 }
 
-// FIXED: Get opening and closing balances based on actual transaction data with UTC date range
+// FIXED: Get opening and closing balances based on actual transaction data with date range
+// FIXED: Get opening and closing balances based on actual transaction data with date range
 export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
   try {
     console.log(
@@ -1133,11 +1076,15 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // Use UTC date formatting
-    const openingDateStr = formatUTCDateForSQL(openingDate, false)
-    const closingDateStr = closingDate ? formatUTCDateForSQL(closingDate, true) : formatUTCDateForSQL(openingDate, true)
+    // Format dates properly without timezone conversion
+    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 00:00:00`
 
-    console.log("UTC date strings for balance calculation:", { openingDateStr, closingDateStr })
+    let closingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 23:59:59`
+    if (closingDate) {
+      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} 23:59:59`
+    }
+
+    console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
 
     // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
     // Money In: credit_amount (sales income, payments received)
@@ -1150,7 +1097,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date AT TIME ZONE 'UTC' < ${openingDateStr}::timestamptz
+        AND transaction_date < ${openingDateStr}::timestamp
     `
 
     // Closing balance: All transactions UP TO AND INCLUDING closing date (≤ closing date at 23:59:59)
@@ -1160,7 +1107,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date AT TIME ZONE 'UTC' <= ${closingDateStr}::timestamptz
+        AND transaction_date <= ${closingDateStr}::timestamp
     `
 
     // Period transactions: Transactions WITHIN the selected date range (opening to closing, inclusive)
@@ -1170,8 +1117,8 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date AT TIME ZONE 'UTC' >= ${openingDateStr}::timestamptz
-        AND transaction_date AT TIME ZONE 'UTC' <= ${closingDateStr}::timestamptz
+        AND transaction_date >= ${openingDateStr}::timestamp
+        AND transaction_date <= ${closingDateStr}::timestamp
     `
 
     // Calculate opening balance (before the period starts)
@@ -1193,7 +1140,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
     const calculatedClosing = openingBalance + periodNet
     const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
 
-    console.log("Balance calculation results (UTC):", {
+    console.log("Balance calculation results:", {
       dateRange: `${openingDateStr} to ${closingDateStr}`,
       openingCredits,
       openingDebits,
@@ -1231,7 +1178,7 @@ export async function getAccountingBalances(deviceId: number, openingDate: Date,
       closingCredits,      // Total credits up to end of period
       closingDebits,       // Total debits up to end of period
     }
-  } catch (error: any) {
+  } catch (error) {
     console.error("Error getting accounting balances:", error)
     return {
       openingBalance: 0,

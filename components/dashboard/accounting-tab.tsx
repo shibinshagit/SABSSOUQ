@@ -1468,6 +1468,7 @@ const getRemainingAmount = (transaction: any) => {
     return Math.max(0, totalAmount - receivedAmount)
   }
   
+  
   // For paid purchases with partial payment
   if (status === 'paid' && receivedAmount < totalAmount) {
     return Math.max(0, totalAmount - receivedAmount)
