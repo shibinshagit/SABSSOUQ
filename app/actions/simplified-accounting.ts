@@ -1062,16 +1062,16 @@ function getAccountType(transactionType: string): string {
 
 
 // FIXED: Get opening and closing balances with matching logic to getFinancialSummary
-export async function getAccountingBalances(deviceId: number, dateFrom: Date, dateTo: Date) {
+export async function getAccountingBalances(deviceId: number, dateFromStr: string, dateToStr: string) {
   try {
-    console.log("Calculating balances for device:", deviceId, "from", dateFrom, "to", dateTo)
+    console.log("Calculating balances for device:", deviceId, "from", dateFromStr, "to", dateToStr)
 
     // Ensure table exists
     await createFinancialTransactionsTable()
 
     // Format dates for SQL
-    const fromDateStr = `${dateFrom.getFullYear()}-${String(dateFrom.getMonth() + 1).padStart(2, "0")}-${String(dateFrom.getDate()).padStart(2, "0")} 00:00:00`
-    const toDateStr = `${dateTo.getFullYear()}-${String(dateTo.getMonth() + 1).padStart(2, "0")}-${String(dateTo.getDate()).padStart(2, "0")} 23:59:59`
+    const fromDateSql = `${dateFromStr} 00:00:00`
+    const toDateSql = `${dateToStr} 23:59:59`
 
     // Cutoff Date: Ignore all data before December 1st, 2025
     const cutoffDateStr = '2025-12-01 00:00:00'
@@ -1084,7 +1084,7 @@ export async function getAccountingBalances(deviceId: number, dateFrom: Date, da
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date < ${fromDateStr}::timestamp
+        AND transaction_date < ${fromDateSql}::timestamp
         AND transaction_date >= ${cutoffDateStr}::timestamp
     `
 
@@ -1095,7 +1095,7 @@ export async function getAccountingBalances(deviceId: number, dateFrom: Date, da
         COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date <= ${toDateStr}::timestamp
+        AND transaction_date <= ${toDateSql}::timestamp
         AND transaction_date >= ${cutoffDateStr}::timestamp
     `
 
@@ -1103,7 +1103,7 @@ export async function getAccountingBalances(deviceId: number, dateFrom: Date, da
     const closingBalance = (Number((closingQuery as any)[0]?.total_credits) || 0) - (Number((closingQuery as any)[0]?.total_debits) || 0)
 
     console.log("Balance calc:", {
-      range: `${fromDateStr} to ${toDateStr}`,
+      range: `${fromDateSql} to ${toDateSql}`,
       opening: openingBalance,
       closing: closingBalance
     })

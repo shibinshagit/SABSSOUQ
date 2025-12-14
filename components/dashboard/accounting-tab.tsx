@@ -338,19 +338,8 @@ export default function AccountingTab({ userId, companyId, deviceId }: Accountin
         return
       }
 
-      const startOfFromDate = new Date(
-        fromDate.getFullYear(),
-        fromDate.getMonth(),
-        fromDate.getDate(),
-        0, 0, 0, 0
-      )
-
-      const endOfToDate = new Date(
-        toDate.getFullYear(),
-        toDate.getMonth(),
-        toDate.getDate(),
-        23, 59, 59, 999
-      )
+      const startOfFromDate = format(fromDate, 'yyyy-MM-dd')
+      const endOfToDate = format(toDate, 'yyyy-MM-dd')
 
       const balanceData = await getAccountingBalances(deviceId, startOfFromDate, endOfToDate)
       dispatch(setBalances(balanceData))
