@@ -1077,12 +1077,11 @@ export async function getAccountingBalances(deviceId: number, dateFrom: Date, da
     const cutoffDateStr = '2025-12-01 00:00:00'
 
     // Opening Balance: All transactions strictly BEFORE the fromDate AND AFTER/ON cutoff
-    // Cash Impact = Money In (Credits) - Money Out (Debits) - Cost (COGS)
+    // Money In/Out = Money In (Credits) - Money Out (Debits)
     const openingQuery = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits,
-        COALESCE(SUM(cost_amount), 0) as total_costs
+        COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
         AND transaction_date < ${fromDateStr}::timestamp
@@ -1093,16 +1092,15 @@ export async function getAccountingBalances(deviceId: number, dateFrom: Date, da
     const closingQuery = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits,
-        COALESCE(SUM(cost_amount), 0) as total_costs
+        COALESCE(SUM(debit_amount), 0) as total_debits
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
         AND transaction_date <= ${toDateStr}::timestamp
         AND transaction_date >= ${cutoffDateStr}::timestamp
     `
 
-    const openingBalance = (Number((openingQuery as any)[0]?.total_credits) || 0) - (Number((openingQuery as any)[0]?.total_debits) || 0) - (Number((openingQuery as any)[0]?.total_costs) || 0)
-    const closingBalance = (Number((closingQuery as any)[0]?.total_credits) || 0) - (Number((closingQuery as any)[0]?.total_debits) || 0) - (Number((closingQuery as any)[0]?.total_costs) || 0)
+    const openingBalance = (Number((openingQuery as any)[0]?.total_credits) || 0) - (Number((openingQuery as any)[0]?.total_debits) || 0)
+    const closingBalance = (Number((closingQuery as any)[0]?.total_credits) || 0) - (Number((closingQuery as any)[0]?.total_debits) || 0)
 
     console.log("Balance calc:", {
       range: `${fromDateStr} to ${toDateStr}`,
