@@ -193,20 +193,20 @@ export async function recordSaleTransaction(saleData: {
       // FIXED: Credit sales - cash impact = received amount - proportional COGS
       creditAmount = Number(saleData.receivedAmount) || 0 // Count received amount as credit
       debitAmount = 0
-      
+
       // Calculate proportional COGS based on payment received
       const totalAmount = Number(saleData.totalAmount) || 0
       const receivedAmount = Number(saleData.receivedAmount) || 0
-      
+
       if (receivedAmount > 0 && totalAmount > 0) {
         const paymentRatio = receivedAmount / totalAmount
         costAmount = (Number(saleData.cogsAmount) || 0) * paymentRatio
       } else {
         costAmount = 0 // No COGS impact if no payment received
       }
-      
+
       description = `Sale #${saleData.saleId} - Credit - ${saleData.paymentMethod || "Cash"} - Customer: ${saleData.customerId ? `ID ${saleData.customerId}` : "Walk-in"} - Received: ${receivedAmountForRecord}`
-      
+
       console.log(`Credit sale recorded: Partial payment ${receivedAmountForRecord}, COGS: ${costAmount}`)
     } else {
       // Completed sales: credit = received amount, debit = 0
@@ -306,7 +306,7 @@ export async function recordSaleAdjustment(adjustmentData: {
         creditAmount = receivedDiff
         const paymentRatio = receivedDiff / newAmount
         costAmount = newCogs * paymentRatio // Only recognize COGS for the portion paid
-        
+
         console.log(`Credit sale payment: Received ${receivedDiff}, COGS recognized: ${costAmount}`)
       } else if (receivedDiff > 0 && newStatus !== "credit") {
         // More money received for non-credit sales: credit = received amount increase
@@ -390,7 +390,7 @@ export async function recordSaleAdjustment(adjustmentData: {
       // FIXED: Payment adjustments for credit sales - record actual money received with proportional COGS
       if (receivedDiff > 0) {
         const previousStatus = adjustmentData.previousValues.status?.toLowerCase() || ""
-        
+
         if (previousStatus === "credit") {
           // Credit sale payment: record cash received with proportional COGS
           creditAmount = receivedDiff
@@ -628,7 +628,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
           console.log(`Purchase edit: Amount decreased by ${Math.abs(amountDiff)}, recording credit`)
         }
       }
-      
+
       // Handle payment changes separately from amount changes
       if (receivedDiff > 0) {
         // Additional payment made
@@ -647,7 +647,7 @@ export async function recordPurchaseAdjustment(adjustmentData: {
         console.log("No financial changes in purchase edit")
         return { success: true, transactionId: null, message: "No financial changes to record" }
       }
-    } 
+    }
     else if (adjustmentData.changeType === "payment") {
       // Payment adjustments
       if (receivedDiff > 0) {
@@ -661,14 +661,14 @@ export async function recordPurchaseAdjustment(adjustmentData: {
       } else {
         return { success: true, transactionId: null, message: "No payment changes to record" }
       }
-    } 
+    }
     else if (adjustmentData.changeType === "cancel") {
       // Cancelled purchases - refund any money paid
       const previousReceived = Number(adjustmentData.previousValues.receivedAmount) || 0
       creditAmount = previousReceived
       status = "Cancelled"
       description = `Purchase #${adjustmentData.purchaseId} - Cancelled - Refund ${previousReceived}`
-    } 
+    }
     else {
       // Simple edit adjustments (fallback)
       if (receivedDiff > 0) {
@@ -956,7 +956,7 @@ export async function getFinancialSummary(deviceId: number, dateFrom?: Date, dat
         const type = tx.transaction_type || "Unknown"
         const creditAmount = Number(tx.credit_amount) || 0
         const debitAmount = Number(tx.debit_amount) || 0
-        
+
         // FIXED: For credit purchases, calculate remaining amount properly
         let remaining = 0
         if (status.toLowerCase() === 'credit' && type === 'purchase') {
@@ -1060,136 +1060,63 @@ function getAccountType(transactionType: string): string {
   }
 }
 
-// FIXED: Get opening and closing balances based on actual transaction data with date range
-// FIXED: Get opening and closing balances based on actual transaction data with date range
-export async function getAccountingBalances(deviceId: number, openingDate: Date, closingDate?: Date) {
+
+// FIXED: Get opening and closing balances with matching logic to getFinancialSummary
+export async function getAccountingBalances(deviceId: number, dateFrom: Date, dateTo: Date) {
   try {
-    console.log(
-      "Getting accounting balances for device:",
-      deviceId,
-      "opening date:",
-      openingDate,
-      "closing date:",
-      closingDate,
-    )
+    console.log("Calculating balances for device:", deviceId, "from", dateFrom, "to", dateTo)
 
     // Ensure table exists
     await createFinancialTransactionsTable()
 
-    // Format dates properly without timezone conversion
-    const openingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 00:00:00`
+    // Format dates for SQL
+    const fromDateStr = `${dateFrom.getFullYear()}-${String(dateFrom.getMonth() + 1).padStart(2, "0")}-${String(dateFrom.getDate()).padStart(2, "0")} 00:00:00`
+    const toDateStr = `${dateTo.getFullYear()}-${String(dateTo.getMonth() + 1).padStart(2, "0")}-${String(dateTo.getDate()).padStart(2, "0")} 23:59:59`
 
-    let closingDateStr = `${openingDate.getFullYear()}-${String(openingDate.getMonth() + 1).padStart(2, "0")}-${String(openingDate.getDate()).padStart(2, "0")} 23:59:59`
-    if (closingDate) {
-      closingDateStr = `${closingDate.getFullYear()}-${String(closingDate.getMonth() + 1).padStart(2, "0")}-${String(closingDate.getDate()).padStart(2, "0")} 23:59:59`
-    }
+    // Cutoff Date: Ignore all data before December 1st, 2025
+    const cutoffDateStr = '2025-12-01 00:00:00'
 
-    console.log("Date strings for balance calculation:", { openingDateStr, closingDateStr })
-
-    // FIXED: Calculate CASH BALANCE = Total Money In (credits) - Total Money Out (debits)
-    // Money In: credit_amount (sales income, payments received)
-    // Money Out: debit_amount (purchases, supplier payments, refunds, expenses)
-    
-    // Opening balance: All transactions BEFORE opening date (< opening date at 00:00:00)
-    const openingTransactions = await sql`
+    // Opening Balance: All transactions strictly BEFORE the fromDate AND AFTER/ON cutoff
+    // Cash Impact = Money In (Credits) - Money Out (Debits) - Cost (COGS)
+    const openingQuery = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
+        COALESCE(SUM(debit_amount), 0) as total_debits,
+        COALESCE(SUM(cost_amount), 0) as total_costs
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date < ${openingDateStr}::timestamp
+        AND transaction_date < ${fromDateStr}::timestamp
+        AND transaction_date >= ${cutoffDateStr}::timestamp
     `
 
-    // Closing balance: All transactions UP TO AND INCLUDING closing date (≤ closing date at 23:59:59)
-    const closingTransactions = await sql`
+    // Closing Balance: All transactions UP TO and INCLUDING the toDate AND AFTER/ON cutoff
+    const closingQuery = await sql`
       SELECT 
         COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
+        COALESCE(SUM(debit_amount), 0) as total_debits,
+        COALESCE(SUM(cost_amount), 0) as total_costs
       FROM financial_transactions 
       WHERE device_id = ${deviceId} 
-        AND transaction_date <= ${closingDateStr}::timestamp
+        AND transaction_date <= ${toDateStr}::timestamp
+        AND transaction_date >= ${cutoffDateStr}::timestamp
     `
 
-    // Period transactions: Transactions WITHIN the selected date range (opening to closing, inclusive)
-    const periodTransactions = await sql`
-      SELECT 
-        COALESCE(SUM(credit_amount), 0) as total_credits,
-        COALESCE(SUM(debit_amount), 0) as total_debits
-      FROM financial_transactions 
-      WHERE device_id = ${deviceId} 
-        AND transaction_date >= ${openingDateStr}::timestamp
-        AND transaction_date <= ${closingDateStr}::timestamp
-    `
+    const openingBalance = (Number((openingQuery as any)[0]?.total_credits) || 0) - (Number((openingQuery as any)[0]?.total_debits) || 0) - (Number((openingQuery as any)[0]?.total_costs) || 0)
+    const closingBalance = (Number((closingQuery as any)[0]?.total_credits) || 0) - (Number((closingQuery as any)[0]?.total_debits) || 0) - (Number((closingQuery as any)[0]?.total_costs) || 0)
 
-    // Calculate opening balance (before the period starts)
-    const openingCredits = Number(openingTransactions[0]?.total_credits) || 0
-    const openingDebits = Number(openingTransactions[0]?.total_debits) || 0
-    const openingBalance = openingCredits - openingDebits
-
-    // Calculate closing balance (at the end of the period)
-    const closingCredits = Number(closingTransactions[0]?.total_credits) || 0
-    const closingDebits = Number(closingTransactions[0]?.total_debits) || 0
-    const closingBalance = closingCredits - closingDebits
-
-    // Calculate period changes (transactions during the selected period)
-    const periodCredits = Number(periodTransactions[0]?.total_credits) || 0
-    const periodDebits = Number(periodTransactions[0]?.total_debits) || 0
-    const periodNet = periodCredits - periodDebits
-
-    // Verification: opening + period net should equal closing
-    const calculatedClosing = openingBalance + periodNet
-    const balanceMatches = Math.abs(calculatedClosing - closingBalance) < 0.01
-
-    console.log("Balance calculation results:", {
-      dateRange: `${openingDateStr} to ${closingDateStr}`,
-      openingCredits,
-      openingDebits,
-      openingBalance,
-      periodCredits,
-      periodDebits,
-      periodNet,
-      closingCredits,
-      closingDebits,
-      closingBalance,
-      verification: {
-        calculated: calculatedClosing,
-        actual: closingBalance,
-        matches: balanceMatches ? '✅ CORRECT' : '❌ ERROR'
-      }
+    console.log("Balance calc:", {
+      range: `${fromDateStr} to ${toDateStr}`,
+      opening: openingBalance,
+      closing: closingBalance
     })
 
-    // Log warning if balances don't match
-    if (!balanceMatches) {
-      console.warn("⚠️ Balance verification failed!", {
-        expected: calculatedClosing,
-        actual: closingBalance,
-        difference: closingBalance - calculatedClosing
-      })
+    return {
+      openingBalance,
+      closingBalance
     }
 
-    return {
-      openingBalance,      // Balance before the period starts
-      closingBalance,      // Balance at the end of the period
-      periodCredits,       // Money in during the period
-      periodDebits,        // Money out during the period
-      periodNet,           // Net change during the period (credits - debits)
-      openingCredits,      // Total credits before period
-      openingDebits,       // Total debits before period
-      closingCredits,      // Total credits up to end of period
-      closingDebits,       // Total debits up to end of period
-    }
   } catch (error) {
-    console.error("Error getting accounting balances:", error)
-    return {
-      openingBalance: 0,
-      closingBalance: 0,
-      periodCredits: 0,
-      periodDebits: 0,
-      periodNet: 0,
-      openingCredits: 0,
-      openingDebits: 0,
-      closingCredits: 0,
-      closingDebits: 0,
-    }
+    console.error("Error calculating balances:", error)
+    return { openingBalance: 0, closingBalance: 0 }
   }
 }

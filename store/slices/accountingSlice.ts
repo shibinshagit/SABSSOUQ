@@ -60,12 +60,6 @@ export interface FinancialData {
 interface BalanceData {
   openingBalance: number
   closingBalance: number
-  openingCredits: number
-  openingDebits: number
-  closingCredits: number
-  closingDebits: number
-  openingReceived: number
-  closingReceived: number
 }
 
 interface AccountingState {
@@ -95,12 +89,12 @@ export const calculateCashImpact = (transaction: Transaction): number => {
   const totalAmount = Number(transaction.amount) || 0
   const receivedAmount = Number(transaction.received) || 0
   const costAmount = Number(transaction.cost) || 0
-  
+
   // For supplier payments, cash impact is negative
   if (type === 'supplier_payment' || transaction.description?.toLowerCase().includes('supplier payment')) {
     return -Math.abs(transaction.debit || transaction.amount)
   }
-  
+
   // For credit sales - handle both no payment and partial payment
   if (status === 'credit') {
     if (receivedAmount > 0) {
@@ -113,28 +107,28 @@ export const calculateCashImpact = (transaction: Transaction): number => {
       return 0
     }
   }
-  
+
   // For completed sales: cash impact = received amount - cost
-  if ((status === 'completed' || status === 'paid') && 
-      (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
+  if ((status === 'completed' || status === 'paid') &&
+    (type === 'sale' || transaction.description?.toLowerCase().startsWith('sale'))) {
     return receivedAmount - costAmount
   }
-  
+
   // For purchases: cash impact = -debit amount (money going out)
   if (type === 'purchase' || transaction.description?.toLowerCase().startsWith('purchase')) {
     return -Math.abs(transaction.debit || transaction.amount)
   }
-  
+
   // For manual debit transactions: cash impact = -amount
   if (type === 'manual' && transaction.debit > 0) {
     return -transaction.debit
   }
-  
+
   // For manual credit transactions: cash impact = +amount
   if (type === 'manual' && transaction.credit > 0) {
     return transaction.credit
   }
-  
+
   // Default calculation (should rarely be used)
   return transaction.credit - transaction.debit
 }
@@ -144,22 +138,22 @@ export const calculateRemainingAmount = (transaction: Transaction) => {
   const status = transaction.status?.toLowerCase();
   const amount = Number(transaction.amount) || 0;
   const received = Number(transaction.received) || 0;
-  
+
   // For credit sales, remaining amount is total minus actual received
   if (type === 'sale' && status === 'credit') {
     return Math.max(0, amount - received);
   }
-  
+
   // For other sale types
   if (type === 'sale') {
     return Math.max(0, amount - received);
   }
-  
+
   // For purchases
   if (type === 'purchase') {
     return Math.max(0, amount - received);
   }
-  
+
   return 0;
 };
 
@@ -169,12 +163,12 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
   const amount = Number(transaction.amount) || 0;
   const received = Number(transaction.received) || 0;
   const credit = Number(transaction.credit) || 0;
-  
+
   // For credit sales with partial payments
   if (type === 'sale' && status === 'credit') {
     const actualReceived = received;
     const remaining = amount - actualReceived;
-    
+
     if (actualReceived > 0 && actualReceived < amount) {
       // Partial credit sale - show partial payment
       return {
@@ -193,7 +187,7 @@ export const getMoneyFlowDisplay = (transaction: Transaction) => {
       };
     }
   }
-  
+
   // Existing logic for other transaction types
   if (type === 'sale' && status === 'completed') {
     return {
@@ -277,14 +271,14 @@ export const accountingSlice = createSlice({
   },
 })
 
-export const { 
-  setFinancialData, 
-  setBalances, 
-  setDateRange, 
-  setLoading, 
-  setBackgroundLoading, 
+export const {
+  setFinancialData,
+  setBalances,
+  setDateRange,
+  setLoading,
+  setBackgroundLoading,
   clearFinancialData,
-  updateTransaction 
+  updateTransaction
 } = accountingSlice.actions
 
 // Selectors
